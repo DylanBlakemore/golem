@@ -34,28 +34,28 @@
 Reference: [compiler-pipeline.md](../architecture/compiler-pipeline.md) Phase 1
 
 ### Token Types
-- [ ] Keywords: `fn`, `pub`, `priv`, `let`, `match`, `do`, `end`, `type`, `import`, `if`, `else`, `go`, `return`, `test`, `assert`
-- [ ] Literals: integers, floats, strings (with interpolation tracking), booleans
-- [ ] Identifiers and type identifiers (capitalized)
-- [ ] Operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `!`, `|>`, `->`, `?`, `<>`, `<-`, `=`, `:`, `|`
-- [ ] Delimiters: `(`, `)`, `{`, `}`, `[`, `]`, `,`, `.`
-- [ ] String interpolation tokens: `#{` open, `}` close
-- [ ] Comments: `--` line comments
+- [x] Keywords: `fn`, `pub`, `priv`, `let`, `match`, `do`, `end`, `type`, `import`, `if`, `else`, `go`, `return`, `test`, `assert`
+- [x] Literals: integers, floats, strings (with interpolation tracking), booleans
+- [x] Identifiers and type identifiers (capitalized)
+- [x] Operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `!`, `|>`, `->`, `?`, `<>`, `<-`, `=`, `:`, `|`
+- [x] Delimiters: `(`, `)`, `{`, `}`, `[`, `]`, `,`, `.`
+- [x] String interpolation tokens: `#{` open, `}` close
+- [x] Comments: `--` line comments
 
 ### Core Implementation
-- [ ] `Span` type with byte offsets, line, and column
-- [ ] `Token` type carrying kind, literal value, and `Span`
-- [ ] Lexer struct with source input, position tracking
-- [ ] Newline significance for statement termination
-- [ ] String interpolation state machine (track nesting depth)
-- [ ] Error recovery: emit `ERROR` token and continue
+- [x] `Span` type with byte offsets, line, and column
+- [x] `Token` type carrying kind, literal value, and `Span`
+- [x] Lexer struct with source input, position tracking
+- [x] Newline significance for statement termination
+- [x] String interpolation state machine (track nesting depth)
+- [x] Error recovery: emit `ERROR` token and continue
 
 ### Tests
-- [ ] Unit tests for each token category
-- [ ] Test string interpolation (including nested)
-- [ ] Test error recovery on malformed input
-- [ ] Test span accuracy (line/column numbers)
-- [ ] Snapshot tests for representative Golem source files
+- [x] Unit tests for each token category
+- [x] Test string interpolation (including nested)
+- [x] Test error recovery on malformed input
+- [x] Test span accuracy (line/column numbers)
+- [x] Snapshot tests for representative Golem source files
 
 ---
 
