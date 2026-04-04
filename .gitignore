@@ -1,0 +1,21 @@
+# Binaries
+bin/
+dist/
+
+# Test output
+*.test
+coverage.out
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Go build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Golem build output
+build/

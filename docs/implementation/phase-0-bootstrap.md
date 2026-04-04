@@ -8,8 +8,8 @@
 
 ## 0.1 — Project Scaffolding & Build Infrastructure
 
-- [ ] Initialize Go module (`go mod init`)
-- [ ] Set up directory structure:
+- [x] Initialize Go module (`go mod init`)
+- [x] Set up directory structure:
   ```
   cmd/golem/         — CLI entrypoint
   internal/
@@ -23,9 +23,9 @@
     diagnostic/      — error reporting
     span/            — source location tracking
   ```
-- [ ] Set up test infrastructure (`go test ./...`)
-- [ ] Set up CI (GitHub Actions: build, test, lint)
-- [ ] Add `Makefile` with `build`, `test`, `lint` targets
+- [x] Set up test infrastructure (`go test ./...`)
+- [x] Set up CI (GitHub Actions: build, test, lint)
+- [x] Add `Makefile` with `build`, `test`, `lint` targets
 
 ---
 
