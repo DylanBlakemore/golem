@@ -50,6 +50,8 @@ linters:
       - builtin$
       - examples$
   settings:
+    exhaustive:
+      default-signifies-exhaustive: true
     lll:
       line-length: 150
     funlen:
