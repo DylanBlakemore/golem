@@ -194,9 +194,12 @@ func frontendPipeline(file, src string, verbose bool) (*ast.Module, bool) {
 	}
 
 	start = time.Now()
-	_, cerrs := checker.Check(mod, res)
+	info, cerrs := checker.Check(mod, res)
 	if verbose {
 		fmt.Fprintf(os.Stderr, "[check] %s: %s\n", file, time.Since(start))
+	}
+	if len(info.Warnings) > 0 {
+		printCheckWarnings(info.Warnings, src)
 	}
 	if len(cerrs) > 0 {
 		printCheckErrors(cerrs, "type", src)
@@ -274,6 +277,20 @@ func printResolveErrors(errs []resolver.Error, phase, source string) {
 		msgs[i] = e.Message
 	}
 	fmt.Fprint(os.Stderr, diagnostic.FormatDiagnostics(toDiagnostics(spans, msgs, phase), source))
+}
+
+func printCheckWarnings(warnings []checker.Warning, source string) {
+	spans := make([]span.Span, len(warnings))
+	msgs := make([]string, len(warnings))
+	for i, w := range warnings {
+		spans[i] = w.Span
+		msgs[i] = w.Message
+	}
+	diags := toDiagnostics(spans, msgs, "type")
+	for i := range diags {
+		diags[i].Severity = "warning"
+	}
+	fmt.Fprint(os.Stderr, diagnostic.FormatDiagnostics(diags, source))
 }
 
 func printCheckErrors(errs []checker.Error, phase, source string) {

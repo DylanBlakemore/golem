@@ -8,11 +8,12 @@ import (
 	"github.com/dylanblakemore/golem/internal/span"
 )
 
-// Diagnostic represents a compiler error with source location information.
+// Diagnostic represents a compiler error or warning with source location information.
 type Diagnostic struct {
-	Span    span.Span
-	Message string
-	Phase   string // e.g. "parse", "resolve", "type"
+	Span     span.Span
+	Message  string
+	Phase    string // e.g. "parse", "resolve", "type"
+	Severity string // "error" (default) or "warning"
 }
 
 // FormatDiagnostic formats a single diagnostic with source context.
@@ -20,12 +21,15 @@ type Diagnostic struct {
 func FormatDiagnostic(d Diagnostic, source string) string {
 	var b strings.Builder
 
-	// Header: file:line:column: phase error: message
 	loc := d.Span.String()
+	sev := d.Severity
+	if sev == "" {
+		sev = "error"
+	}
 	if d.Phase != "" {
-		fmt.Fprintf(&b, "%s: %s error: %s\n", loc, d.Phase, d.Message)
+		fmt.Fprintf(&b, "%s: %s %s: %s\n", loc, d.Phase, sev, d.Message)
 	} else {
-		fmt.Fprintf(&b, "%s: error: %s\n", loc, d.Message)
+		fmt.Fprintf(&b, "%s: %s: %s\n", loc, sev, d.Message)
 	}
 
 	if source == "" || d.Span.Start.Line <= 0 {

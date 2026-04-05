@@ -104,30 +104,30 @@ Reference: [pattern-matching.md](../architecture/pattern-matching.md)
 Reference: [pattern-matching.md](../architecture/pattern-matching.md) — Maranget Algorithm
 
 ### Implementation
-- [ ] Pattern matrix representation (rows = arms, columns = sub-positions)
-- [ ] Type category classification:
+- [x] Pattern matrix representation (rows = arms, columns = sub-positions)
+- [x] Type category classification:
   - Finite: sum types, Bool, Option, Result
   - Infinite: Int, Float, String
-- [ ] Specialization operation: replace pattern column with constructor sub-patterns
-- [ ] Default matrix operation: keep wildcard/variable rows, remove column
-- [ ] Recursive exhaustiveness check:
+- [x] Specialization operation: replace pattern column with constructor sub-patterns
+- [x] Default matrix operation: keep wildcard/variable rows, remove column
+- [x] Recursive exhaustiveness check:
   - Finite types: specialize for each constructor, all must be present
   - Infinite types: require wildcard/variable catch-all
-- [ ] Missing pattern reconstruction (readable error messages)
-- [ ] Redundancy detection (unreachable arms -> warning)
+- [x] Missing pattern reconstruction (readable error messages)
+- [x] Redundancy detection (unreachable arms -> warning)
 
 ### Integration
-- [ ] Runs after type checking (Phase 5 of pipeline)
-- [ ] Errors block code generation
-- [ ] Warnings emitted but don't block
+- [x] Runs after type checking (Phase 5 of pipeline)
+- [x] Errors block code generation
+- [x] Warnings emitted but don't block
 
 ### Tests
-- [ ] Test exhaustive match on sum types (all variants covered)
-- [ ] Test non-exhaustive match (missing variant -> error with readable message)
-- [ ] Test wildcard catch-all satisfies exhaustiveness
-- [ ] Test redundant arm detection
-- [ ] Test Bool exhaustiveness (`true` + `false` = exhaustive)
-- [ ] Test infinite type requires wildcard
+- [x] Test exhaustive match on sum types (all variants covered)
+- [x] Test non-exhaustive match (missing variant -> error with readable message)
+- [x] Test wildcard catch-all satisfies exhaustiveness
+- [x] Test redundant arm detection
+- [x] Test Bool exhaustiveness (`true` + `false` = exhaustive)
+- [x] Test infinite type requires wildcard
 
 ---
 

@@ -20,7 +20,8 @@ func (e Error) Error() string {
 
 // TypeInfo stores the inferred types for AST nodes, keyed by span string.
 type TypeInfo struct {
-	Types map[string]*Type
+	Types    map[string]*Type
+	Warnings []Warning
 }
 
 // Lookup returns the type for a given span, or nil.
@@ -30,12 +31,13 @@ func (ti *TypeInfo) Lookup(s span.Span) *Type {
 
 // Checker performs type inference and checking on a resolved Golem module.
 type Checker struct {
-	module *ast.Module
-	res    *resolver.Resolution
-	info   *TypeInfo
-	env    *typeEnv
-	errors []Error
-	nextID uint64
+	module   *ast.Module
+	res      *resolver.Resolution
+	info     *TypeInfo
+	env      *typeEnv
+	errors   []Error
+	warnings []Warning
+	nextID   uint64
 
 	// declTypes caches the types of top-level declarations
 	declTypes map[string]*Type
@@ -62,6 +64,7 @@ func Check(mod *ast.Module, res *resolver.Resolution) (*TypeInfo, []Error) {
 		variantToSum: make(map[string]string),
 	}
 	c.check()
+	c.info.Warnings = c.warnings
 	return c.info, c.errors
 }
 
@@ -545,6 +548,8 @@ func (c *Checker) inferMatch(e *ast.MatchExpr, env *typeEnv) *Type {
 		}
 	}
 
+	c.checkMatchExhaustive(e, scrutineeType)
+
 	return resultType
 }
 
@@ -814,6 +819,10 @@ func (c *Checker) record(s span.Span, t *Type) {
 
 func (c *Checker) error(s span.Span, msg string) {
 	c.errors = append(c.errors, Error{Span: s, Message: msg})
+}
+
+func (c *Checker) warning(s span.Span, msg string) {
+	c.warnings = append(c.warnings, Warning{Span: s, Message: msg})
 }
 
 func spanKey(s span.Span) string {
