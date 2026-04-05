@@ -63,9 +63,14 @@ func (p *Parser) Parse() (*ast.Module, []Error) {
 		if p.atEnd() {
 			break
 		}
+		before := p.pos
 		decl := p.parseDecl()
 		if decl != nil {
 			mod.Decls = append(mod.Decls, decl)
+		}
+		// Safety: if parseDecl made no progress, force advance to avoid infinite loop.
+		if p.pos == before {
+			p.advance()
 		}
 		p.skipNewlines()
 	}
