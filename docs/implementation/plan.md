@@ -20,11 +20,11 @@ Golem is a statically typed, expression-oriented language that transpiles to idi
 > **Exit Criteria:** Compile a simple HTTP server that delegates to `net/http`.
 
 - [ ] [Phase 0: Bootstrap](./phase-0-bootstrap.md)
-  - [ ] 0.1 — Project scaffolding & build infrastructure
-  - [ ] 0.2 — Lexer
-  - [ ] 0.3 — Parser
-  - [ ] 0.4 — Name resolution (basic)
-  - [ ] 0.5 — Type checking (monomorphic)
+  - [x] 0.1 — Project scaffolding & build infrastructure
+  - [x] 0.2 — Lexer
+  - [x] 0.3 — Parser
+  - [x] 0.4 — Name resolution (basic)
+  - [x] 0.5 — Type checking (monomorphic)
   - [ ] 0.6 — Desugaring (basic)
   - [ ] 0.7 — Code generation (basic)
   - [ ] 0.8 — CLI (`golem build`, `golem run`)

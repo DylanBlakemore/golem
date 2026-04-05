@@ -1,6 +1,6 @@
 # Phase 0 — Bootstrap
 
-**Status:** Not Started
+**Status:** In Progress
 **Goal:** Lexer, parser, basic type checking, code generation for core constructs, CLI skeleton.
 **Exit Criteria:** Compile a simple HTTP server written in Golem that delegates to `net/http`.
 
@@ -129,42 +129,42 @@ Reference: [compiler-pipeline.md](../architecture/compiler-pipeline.md) Phase 3
 Reference: [type-system.md](../architecture/type-system.md)
 
 ### Type Representation
-- [ ] `Type` struct with `TypeKind` enum
-- [ ] `TCon` (concrete): Int, Float, String, Bool, Any
-- [ ] `TFn` (function): params + return type
-- [ ] `TRecord` (product type): named fields
-- [ ] `TVar` (type variable): Unbound/Linked, level tracking
-- [ ] Union-find with path compression for type variables
+- [x] `Type` struct with `TypeKind` enum
+- [x] `TCon` (concrete): Int, Float, String, Bool, Any
+- [x] `TFn` (function): params + return type
+- [x] `TRecord` (product type): named fields
+- [x] `TVar` (type variable): Unbound/Linked, level tracking
+- [x] Union-find with path compression for type variables
 
 ### Constraint Generation
-- [ ] Literal expressions -> concrete types
-- [ ] Variable references -> look up type in environment
-- [ ] Function calls -> emit `f == Fn(args) -> freshVar` constraint
-- [ ] Binary operators -> emit type constraints for operands and result
-- [ ] Let bindings -> infer RHS type, bind in environment
-- [ ] Function declarations -> check body type matches return annotation
-- [ ] Record construction -> infer field types
-- [ ] Field access -> look up field type from record type
-- [ ] If/else -> both branches must agree on result type
-- [ ] Block -> type of last expression
+- [x] Literal expressions -> concrete types
+- [x] Variable references -> look up type in environment
+- [x] Function calls -> emit `f == Fn(args) -> freshVar` constraint
+- [x] Binary operators -> emit type constraints for operands and result
+- [x] Let bindings -> infer RHS type, bind in environment
+- [x] Function declarations -> check body type matches return annotation
+- [x] Record construction -> infer field types
+- [x] Field access -> look up field type from record type
+- [x] If/else -> both branches must agree on result type
+- [x] Block -> type of last expression
 
 ### Constraint Solving (Unification)
-- [ ] Unify two types recursively
-- [ ] Type variable unification with occur check
-- [ ] Concrete type matching (names must match)
-- [ ] Function type unification (params + return)
-- [ ] Record type unification (field-by-field)
+- [x] Unify two types recursively
+- [x] Type variable unification with occur check
+- [x] Concrete type matching (names must match)
+- [x] Function type unification (params + return)
+- [x] Record type unification (field-by-field)
 
 ### Error Recovery
-- [ ] On unification failure: record diagnostic, assign `TError` poison type
-- [ ] `TError` unifies with anything (prevents cascading errors)
+- [x] On unification failure: record diagnostic, assign `TError` poison type
+- [x] `TError` unifies with anything (prevents cascading errors)
 
 ### Tests
-- [ ] Test type inference for each expression form
-- [ ] Test type error messages
-- [ ] Test record field access type checking
-- [ ] Test function call type checking
-- [ ] Test if/else branch type agreement
+- [x] Test type inference for each expression form
+- [x] Test type error messages
+- [x] Test record field access type checking
+- [x] Test function call type checking
+- [x] Test if/else branch type agreement
 
 ---
 
