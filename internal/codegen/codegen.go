@@ -181,6 +181,8 @@ func (e *emitter) emitStmt(expr ast.Expr) {
 		}
 	case *ast.IfExpr:
 		e.emitIfStmt(s)
+	case *ast.MatchExpr:
+		e.emitMatchStmt(s)
 	default:
 		e.linef("%s", e.exprString(expr))
 	}
@@ -190,6 +192,11 @@ func (e *emitter) emitLetStmt(le *ast.LetExpr) {
 	// If the value is an IfExpr, use the result variable pattern.
 	if ifExpr, ok := le.Value.(*ast.IfExpr); ok {
 		e.emitIfAssign(le.Name, ifExpr)
+		return
+	}
+	// If the value is a MatchExpr, use the result variable pattern.
+	if matchExpr, ok := le.Value.(*ast.MatchExpr); ok {
+		e.emitMatchAssign(le.Name, matchExpr)
 		return
 	}
 	e.linef("%s := %s", le.Name, e.exprString(le.Value))
@@ -304,6 +311,8 @@ func (e *emitter) exprString(expr ast.Expr) string {
 	case *ast.IfExpr:
 		// If-expressions in expression position use an IIFE.
 		return e.ifExprIIFE(ex)
+	case *ast.MatchExpr:
+		return e.matchExprIIFE(ex)
 	case *ast.FnLit:
 		return e.fnLit(ex)
 	case *ast.LetExpr:
@@ -400,6 +409,221 @@ func (e *emitter) ifExprIIFE(ie *ast.IfExpr) string {
 	}
 	b.WriteString("\n}()")
 	return b.String()
+}
+
+// isConstructorMatch returns true if the match has constructor patterns (sum type matching).
+func isConstructorMatch(me *ast.MatchExpr) bool {
+	for _, arm := range me.Arms {
+		if _, ok := arm.Pattern.(*ast.ConstructorPattern); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// emitMatchStmt emits a match expression in statement position.
+func (e *emitter) emitMatchStmt(me *ast.MatchExpr) {
+	if isConstructorMatch(me) {
+		e.emitTypeSwitchStmt(me)
+	} else {
+		e.emitValueSwitchStmt(me)
+	}
+}
+
+func (e *emitter) emitTypeSwitchStmt(me *ast.MatchExpr) {
+	e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
+	for _, arm := range me.Arms {
+		switch p := arm.Pattern.(type) {
+		case *ast.ConstructorPattern:
+			e.linef("case %s:", p.Constructor)
+			e.indent++
+			e.emitPatternBindings(p, "__match")
+			e.emitBody(arm.Body)
+			e.indent--
+		case *ast.VarPattern:
+			e.linef("default:")
+			e.indent++
+			e.linef("%s := __match", p.Name)
+			e.emitBody(arm.Body)
+			e.indent--
+		case *ast.WildcardPattern:
+			e.linef("default:")
+			e.indent++
+			e.emitBody(arm.Body)
+			e.indent--
+		}
+	}
+	e.linef("}")
+}
+
+func (e *emitter) emitValueSwitchStmt(me *ast.MatchExpr) {
+	e.linef("switch %s {", e.exprString(me.Scrutinee))
+	for _, arm := range me.Arms {
+		switch p := arm.Pattern.(type) {
+		case *ast.LiteralPattern:
+			e.linef("case %s:", e.exprString(p.Value))
+			e.indent++
+			e.emitBody(arm.Body)
+			e.indent--
+		case *ast.VarPattern:
+			e.linef("default:")
+			e.indent++
+			e.linef("%s := %s", p.Name, e.exprString(me.Scrutinee))
+			e.emitBody(arm.Body)
+			e.indent--
+		case *ast.WildcardPattern:
+			e.linef("default:")
+			e.indent++
+			e.emitBody(arm.Body)
+			e.indent--
+		}
+	}
+	e.linef("}")
+}
+
+func (e *emitter) emitPatternBindings(p *ast.ConstructorPattern, varName string) {
+	for _, fp := range p.Fields {
+		e.linef("%s := %s.%s", fp.Name, varName, exportField(fp.Name))
+	}
+}
+
+// emitMatchAssign emits a match expression as a result variable assignment.
+func (e *emitter) emitMatchAssign(name string, me *ast.MatchExpr) {
+	goType := e.inferMatchType(me)
+	e.linef("var %s %s", name, goType)
+	if isConstructorMatch(me) {
+		e.emitTypeSwitchAssign(name, me)
+	} else {
+		e.emitValueSwitchAssign(name, me)
+	}
+}
+
+func (e *emitter) emitTypeSwitchAssign(name string, me *ast.MatchExpr) {
+	e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
+	for _, arm := range me.Arms {
+		switch p := arm.Pattern.(type) {
+		case *ast.ConstructorPattern:
+			e.linef("case %s:", p.Constructor)
+			e.indent++
+			e.emitPatternBindings(p, "__match")
+			e.emitMatchArmAssign(name, arm.Body)
+			e.indent--
+		case *ast.VarPattern:
+			e.linef("default:")
+			e.indent++
+			e.linef("%s := __match", p.Name)
+			e.emitMatchArmAssign(name, arm.Body)
+			e.indent--
+		case *ast.WildcardPattern:
+			e.linef("default:")
+			e.indent++
+			e.emitMatchArmAssign(name, arm.Body)
+			e.indent--
+		}
+	}
+	e.linef("}")
+}
+
+func (e *emitter) emitValueSwitchAssign(name string, me *ast.MatchExpr) {
+	e.linef("switch %s {", e.exprString(me.Scrutinee))
+	for _, arm := range me.Arms {
+		switch p := arm.Pattern.(type) {
+		case *ast.LiteralPattern:
+			e.linef("case %s:", e.exprString(p.Value))
+			e.indent++
+			e.emitMatchArmAssign(name, arm.Body)
+			e.indent--
+		case *ast.VarPattern:
+			e.linef("default:")
+			e.indent++
+			e.linef("%s := %s", p.Name, e.exprString(me.Scrutinee))
+			e.emitMatchArmAssign(name, arm.Body)
+			e.indent--
+		case *ast.WildcardPattern:
+			e.linef("default:")
+			e.indent++
+			e.emitMatchArmAssign(name, arm.Body)
+			e.indent--
+		}
+	}
+	e.linef("}")
+}
+
+func (e *emitter) emitMatchArmAssign(name string, body []ast.Expr) {
+	if len(body) == 0 {
+		return
+	}
+	for _, stmt := range body[:len(body)-1] {
+		e.emitStmt(stmt)
+	}
+	e.linef("%s = %s", name, e.exprString(body[len(body)-1]))
+}
+
+func (e *emitter) matchExprIIFE(me *ast.MatchExpr) string {
+	goType := e.inferMatchType(me)
+	var b strings.Builder
+	fmt.Fprintf(&b, "func() %s {\n", goType)
+	if isConstructorMatch(me) {
+		fmt.Fprintf(&b, "switch __match := %s.(type) {\n", e.exprString(me.Scrutinee))
+		for _, arm := range me.Arms {
+			switch p := arm.Pattern.(type) {
+			case *ast.ConstructorPattern:
+				fmt.Fprintf(&b, "case %s:\n", p.Constructor)
+				for _, fp := range p.Fields {
+					fmt.Fprintf(&b, "%s := __match.%s\n", fp.Name, exportField(fp.Name))
+				}
+				e.writeMatchArmReturn(&b, arm.Body)
+			case *ast.VarPattern:
+				b.WriteString("default:\n")
+				fmt.Fprintf(&b, "%s := __match\n", p.Name)
+				e.writeMatchArmReturn(&b, arm.Body)
+			case *ast.WildcardPattern:
+				b.WriteString("default:\n")
+				e.writeMatchArmReturn(&b, arm.Body)
+			}
+		}
+	} else {
+		fmt.Fprintf(&b, "switch %s {\n", e.exprString(me.Scrutinee))
+		for _, arm := range me.Arms {
+			switch p := arm.Pattern.(type) {
+			case *ast.LiteralPattern:
+				fmt.Fprintf(&b, "case %s:\n", e.exprString(p.Value))
+				e.writeMatchArmReturn(&b, arm.Body)
+			case *ast.VarPattern:
+				b.WriteString("default:\n")
+				fmt.Fprintf(&b, "%s := %s\n", p.Name, e.exprString(me.Scrutinee))
+				e.writeMatchArmReturn(&b, arm.Body)
+			case *ast.WildcardPattern:
+				b.WriteString("default:\n")
+				e.writeMatchArmReturn(&b, arm.Body)
+			}
+		}
+	}
+	b.WriteString("}\nreturn *new(")
+	b.WriteString(goType)
+	b.WriteString(")\n}()")
+	return b.String()
+}
+
+func (e *emitter) writeMatchArmReturn(b *strings.Builder, body []ast.Expr) {
+	if len(body) == 0 {
+		return
+	}
+	for _, stmt := range body[:len(body)-1] {
+		fmt.Fprintf(b, "%s\n", e.exprString(stmt))
+	}
+	fmt.Fprintf(b, "return %s\n", e.exprString(body[len(body)-1]))
+}
+
+func (e *emitter) inferMatchType(me *ast.MatchExpr) string {
+	if len(me.Arms) == 0 {
+		return goAny
+	}
+	arm := me.Arms[0]
+	if len(arm.Body) == 0 {
+		return goAny
+	}
+	return e.inferExprType(arm.Body[len(arm.Body)-1])
 }
 
 func (e *emitter) fnLit(fl *ast.FnLit) string {

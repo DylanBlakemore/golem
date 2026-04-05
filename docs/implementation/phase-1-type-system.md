@@ -58,26 +58,26 @@ Reference: [type-system.md](../architecture/type-system.md), [code-generation.md
 Reference: [pattern-matching.md](../architecture/pattern-matching.md)
 
 ### Parsing
-- [ ] `match` expression with `do`/`end` block:
+- [x] `match` expression with `do`/`end` block:
   ```golem
   match shape do
     | Circle { radius } -> radius * radius
     | Rectangle { width, height } -> width * height
   end
   ```
-- [ ] Pattern AST nodes: `ConstructorPattern`, `VarPattern`, `WildcardPattern`, `LiteralPattern`, `RecordPattern`
-- [ ] Match arm: pattern + body expression
-- [ ] `match` is an expression (has a result type)
+- [x] Pattern AST nodes: `ConstructorPattern`, `VarPattern`, `WildcardPattern`, `LiteralPattern`, `RecordPattern`
+- [x] Match arm: pattern + body expression
+- [x] `match` is an expression (has a result type)
 
 ### Type Checking
-- [ ] All match arms must produce the same result type
-- [ ] Constructor patterns type-checked against sum type variants
-- [ ] Variable bindings introduced in pattern scope
-- [ ] Wildcard matches any type
-- [ ] Literal patterns checked against scrutinee type
+- [x] All match arms must produce the same result type
+- [x] Constructor patterns type-checked against sum type variants
+- [x] Variable bindings introduced in pattern scope
+- [x] Wildcard matches any type
+- [x] Literal patterns checked against scrutinee type
 
 ### Code Generation (Flat)
-- [ ] Sum type match -> Go type switch:
+- [x] Sum type match -> Go type switch:
   ```go
   switch v := shape.(type) {
   case ShapeCircle:
@@ -86,16 +86,16 @@ Reference: [pattern-matching.md](../architecture/pattern-matching.md)
       result = v.Width * v.Height
   }
   ```
-- [ ] Expression position: result variable assigned in each branch
-- [ ] Tail position: `return` in each branch
-- [ ] Literal match -> Go `switch` statement
+- [x] Expression position: result variable assigned in each branch
+- [x] Tail position: `return` in each branch
+- [x] Literal match -> Go `switch` statement
 - [ ] Bool match -> `if`/`else`
 
 ### Tests
-- [ ] Parse match expressions with various pattern types
-- [ ] Type check: arm type agreement, pattern variable bindings
-- [ ] Code gen snapshot tests for flat pattern matching
-- [ ] Test expression position vs tail position emission
+- [x] Parse match expressions with various pattern types
+- [x] Type check: arm type agreement, pattern variable bindings
+- [x] Code gen snapshot tests for flat pattern matching
+- [x] Test expression position vs tail position emission
 
 ---
 

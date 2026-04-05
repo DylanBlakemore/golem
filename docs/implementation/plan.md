@@ -38,7 +38,7 @@ Golem is a statically typed, expression-oriented language that transpiles to idi
 
 - [ ] [Phase 1: Type System Core](./phase-1-type-system.md)
   - [x] 1.1 — Sum types (algebraic data types)
-  - [ ] 1.2 — Flat pattern matching
+  - [x] 1.2 — Flat pattern matching
   - [ ] 1.3 — Exhaustiveness checking (Maranget algorithm)
   - [ ] 1.4 — Generics (mapped to Go 1.18+ generics)
   - [ ] 1.5 — Result<T, E> and Option<T> built-in types

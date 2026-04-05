@@ -404,6 +404,78 @@ type NilLit struct {
 func (*NilLit) exprNode()            {}
 func (e *NilLit) GetSpan() span.Span { return e.Span }
 
+// MatchExpr represents a match expression:
+//
+//	match expr do
+//	  | Pattern -> body
+//	end
+type MatchExpr struct {
+	Span      span.Span
+	Scrutinee Expr
+	Arms      []*MatchArm
+}
+
+func (*MatchExpr) exprNode()            {}
+func (e *MatchExpr) GetSpan() span.Span { return e.Span }
+
+// MatchArm represents a single arm in a match expression.
+type MatchArm struct {
+	Span    span.Span
+	Pattern Pattern
+	Body    []Expr
+}
+
+// --- Patterns ---
+
+// Pattern is the interface implemented by all pattern nodes.
+type Pattern interface {
+	patternNode()
+	GetSpan() span.Span
+}
+
+// ConstructorPattern matches a sum type variant: Circle { radius }
+type ConstructorPattern struct {
+	Span        span.Span
+	Constructor string
+	Fields      []*FieldPattern
+}
+
+func (*ConstructorPattern) patternNode()         {}
+func (p *ConstructorPattern) GetSpan() span.Span { return p.Span }
+
+// FieldPattern represents a field binding in a constructor pattern.
+type FieldPattern struct {
+	Span    span.Span
+	Name    string
+	Pattern Pattern // nil means bind to same-name variable
+}
+
+// VarPattern matches anything and binds to a variable.
+type VarPattern struct {
+	Span span.Span
+	Name string
+}
+
+func (*VarPattern) patternNode()         {}
+func (p *VarPattern) GetSpan() span.Span { return p.Span }
+
+// WildcardPattern matches anything without binding: _
+type WildcardPattern struct {
+	Span span.Span
+}
+
+func (*WildcardPattern) patternNode()         {}
+func (p *WildcardPattern) GetSpan() span.Span { return p.Span }
+
+// LiteralPattern matches a literal value.
+type LiteralPattern struct {
+	Span  span.Span
+	Value Expr // IntLit, FloatLit, StringLit, BoolLit
+}
+
+func (*LiteralPattern) patternNode()         {}
+func (p *LiteralPattern) GetSpan() span.Span { return p.Span }
+
 // BadExpr represents a parse error placeholder.
 type BadExpr struct {
 	Span span.Span

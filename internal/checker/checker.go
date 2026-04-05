@@ -200,6 +200,7 @@ func (c *Checker) inferExpr(expr ast.Expr, env *typeEnv) *Type {
 	return t
 }
 
+//nolint:funlen // type-switch over AST nodes is naturally long
 func (c *Checker) inferExprKind(expr ast.Expr, env *typeEnv) *Type {
 	switch e := expr.(type) {
 	case *ast.IntLit:
@@ -232,6 +233,8 @@ func (c *Checker) inferExprKind(expr ast.Expr, env *typeEnv) *Type {
 		return c.inferReturn(e, env)
 	case *ast.StringInterpolation:
 		return c.inferStringInterp(e, env)
+	case *ast.MatchExpr:
+		return c.inferMatch(e, env)
 	case *ast.RecordLit:
 		return c.inferRecordLit(e, env)
 	case *ast.FnLit:
@@ -526,6 +529,79 @@ func (c *Checker) inferVariantLit(e *ast.RecordLit, sumName string, env *typeEnv
 
 	// Variant construction produces the parent sum type
 	return NewSum(sumName, sumDef.Variants)
+}
+
+func (c *Checker) inferMatch(e *ast.MatchExpr, env *typeEnv) *Type {
+	scrutineeType := c.inferExpr(e.Scrutinee, env)
+
+	resultType := c.freshVar()
+
+	for _, arm := range e.Arms {
+		armEnv := env.child()
+		c.checkPattern(arm.Pattern, scrutineeType, armEnv)
+		armType := c.checkBody(arm.Body, armEnv)
+		if armType != nil {
+			c.unify(resultType, armType, arm.Span)
+		}
+	}
+
+	return resultType
+}
+
+// checkPattern type-checks a pattern against the expected type and introduces bindings.
+func (c *Checker) checkPattern(pat ast.Pattern, expected *Type, env *typeEnv) {
+	if pat == nil {
+		return
+	}
+
+	switch p := pat.(type) {
+	case *ast.ConstructorPattern:
+		resolved := Find(expected)
+		if resolved.Kind != KSum {
+			c.error(p.Span, fmt.Sprintf("cannot match constructor pattern against non-sum type %s", resolved))
+			return
+		}
+		// Find the variant
+		var variantDef *SumVariant
+		for _, v := range resolved.Sum.Variants {
+			if v.Name == p.Constructor {
+				variantDef = v
+				break
+			}
+		}
+		if variantDef == nil {
+			c.error(p.Span, fmt.Sprintf("unknown variant %q for type %s", p.Constructor, resolved.Sum.Name))
+			return
+		}
+		// Bind field patterns
+		fieldTypes := make(map[string]*Type, len(variantDef.Fields))
+		for _, f := range variantDef.Fields {
+			fieldTypes[f.Name] = f.Type
+		}
+		for _, fp := range p.Fields {
+			ft, ok := fieldTypes[fp.Name]
+			if !ok {
+				c.error(fp.Span, fmt.Sprintf("unknown field %q in variant %s", fp.Name, p.Constructor))
+				continue
+			}
+			if fp.Pattern != nil {
+				c.checkPattern(fp.Pattern, ft, env)
+			} else {
+				// Shorthand: bind field name as variable
+				env.define(fp.Name, ft)
+			}
+		}
+
+	case *ast.VarPattern:
+		env.define(p.Name, expected)
+
+	case *ast.WildcardPattern:
+		// matches anything, no bindings
+
+	case *ast.LiteralPattern:
+		litType := c.inferExpr(p.Value, env)
+		c.unify(litType, expected, p.Span)
+	}
 }
 
 func (c *Checker) inferFnLit(e *ast.FnLit, env *typeEnv) *Type {

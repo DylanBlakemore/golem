@@ -275,11 +275,58 @@ func (d *desugarer) desugarExpr(expr ast.Expr) ast.Expr {
 			Body:       d.desugarExprs(e.Body),
 		}
 
+	case *ast.MatchExpr:
+		return d.desugarMatchExpr(e)
+
 	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.BoolLit, *ast.NilLit, *ast.BadExpr:
 		return e
 
 	default:
 		return expr
+	}
+}
+
+func (d *desugarer) desugarMatchExpr(e *ast.MatchExpr) *ast.MatchExpr {
+	arms := make([]*ast.MatchArm, len(e.Arms))
+	for i, arm := range e.Arms {
+		arms[i] = &ast.MatchArm{
+			Span:    arm.Span,
+			Pattern: d.desugarPattern(arm.Pattern),
+			Body:    d.desugarExprs(arm.Body),
+		}
+	}
+	return &ast.MatchExpr{
+		Span:      e.Span,
+		Scrutinee: d.desugarExpr(e.Scrutinee),
+		Arms:      arms,
+	}
+}
+
+func (d *desugarer) desugarPattern(pat ast.Pattern) ast.Pattern {
+	if pat == nil {
+		return nil
+	}
+	switch p := pat.(type) {
+	case *ast.ConstructorPattern:
+		name := p.Constructor
+		if goName, ok := d.nameMap[name]; ok {
+			name = goName
+		}
+		fields := make([]*ast.FieldPattern, len(p.Fields))
+		for i, fp := range p.Fields {
+			fields[i] = &ast.FieldPattern{
+				Span:    fp.Span,
+				Name:    fp.Name,
+				Pattern: d.desugarPattern(fp.Pattern),
+			}
+		}
+		return &ast.ConstructorPattern{
+			Span:        p.Span,
+			Constructor: name,
+			Fields:      fields,
+		}
+	default:
+		return pat
 	}
 }
 

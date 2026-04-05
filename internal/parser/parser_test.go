@@ -1062,3 +1062,201 @@ func TestSnapshotPipeWithCalls(t *testing.T) {
 		t.Errorf("expected pipe op, got %d", bin.Op)
 	}
 }
+
+// --- Match expressions ---
+
+func TestParseMatchConstructorPatterns(t *testing.T) {
+	source := `type Shape =
+  | Circle { radius: Float }
+  | Rectangle { width: Float, height: Float }
+
+fn area(s: Shape): Float do
+  match s do
+    | Circle { radius } -> radius * radius
+    | Rectangle { width, height } -> width * height
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[1].(*ast.FnDecl)
+	matchExpr, ok := fn.Body[0].(*ast.MatchExpr)
+	if !ok {
+		t.Fatalf("expected MatchExpr, got %T", fn.Body[0])
+	}
+
+	scr, ok := matchExpr.Scrutinee.(*ast.Ident)
+	if !ok {
+		t.Fatalf("expected Ident scrutinee, got %T", matchExpr.Scrutinee)
+	}
+	if scr.Name != "s" {
+		t.Errorf("expected scrutinee 's', got %q", scr.Name)
+	}
+
+	if len(matchExpr.Arms) != 2 {
+		t.Fatalf("expected 2 arms, got %d", len(matchExpr.Arms))
+	}
+
+	// First arm: Circle { radius }
+	arm0 := matchExpr.Arms[0]
+	cp0, ok := arm0.Pattern.(*ast.ConstructorPattern)
+	if !ok {
+		t.Fatalf("expected ConstructorPattern, got %T", arm0.Pattern)
+	}
+	if cp0.Constructor != "Circle" {
+		t.Errorf("expected constructor 'Circle', got %q", cp0.Constructor)
+	}
+	if len(cp0.Fields) != 1 {
+		t.Fatalf("expected 1 field, got %d", len(cp0.Fields))
+	}
+	if cp0.Fields[0].Name != "radius" {
+		t.Errorf("expected field 'radius', got %q", cp0.Fields[0].Name)
+	}
+
+	// Second arm: Rectangle { width, height }
+	arm1 := matchExpr.Arms[1]
+	cp1, ok := arm1.Pattern.(*ast.ConstructorPattern)
+	if !ok {
+		t.Fatalf("expected ConstructorPattern, got %T", arm1.Pattern)
+	}
+	if cp1.Constructor != "Rectangle" {
+		t.Errorf("expected constructor 'Rectangle', got %q", cp1.Constructor)
+	}
+	if len(cp1.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(cp1.Fields))
+	}
+}
+
+func TestParseMatchUnitVariant(t *testing.T) {
+	source := `type Color =
+  | Red
+  | Green
+  | Blue
+
+fn name(c: Color): String do
+  match c do
+    | Red -> "red"
+    | Green -> "green"
+    | Blue -> "blue"
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[1].(*ast.FnDecl)
+	matchExpr, ok := fn.Body[0].(*ast.MatchExpr)
+	if !ok {
+		t.Fatalf("expected MatchExpr, got %T", fn.Body[0])
+	}
+
+	if len(matchExpr.Arms) != 3 {
+		t.Fatalf("expected 3 arms, got %d", len(matchExpr.Arms))
+	}
+
+	for i, name := range []string{"Red", "Green", "Blue"} {
+		cp, ok := matchExpr.Arms[i].Pattern.(*ast.ConstructorPattern)
+		if !ok {
+			t.Fatalf("arm %d: expected ConstructorPattern, got %T", i, matchExpr.Arms[i].Pattern)
+		}
+		if cp.Constructor != name {
+			t.Errorf("arm %d: expected %q, got %q", i, name, cp.Constructor)
+		}
+		if len(cp.Fields) != 0 {
+			t.Errorf("arm %d: expected 0 fields, got %d", i, len(cp.Fields))
+		}
+	}
+}
+
+func TestParseMatchWildcard(t *testing.T) {
+	source := `fn describe(x: Int): String do
+  match x do
+    | 0 -> "zero"
+    | _ -> "other"
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[0].(*ast.FnDecl)
+	matchExpr := fn.Body[0].(*ast.MatchExpr)
+
+	if len(matchExpr.Arms) != 2 {
+		t.Fatalf("expected 2 arms, got %d", len(matchExpr.Arms))
+	}
+
+	// First arm: literal 0
+	lp, ok := matchExpr.Arms[0].Pattern.(*ast.LiteralPattern)
+	if !ok {
+		t.Fatalf("expected LiteralPattern, got %T", matchExpr.Arms[0].Pattern)
+	}
+	intLit, ok := lp.Value.(*ast.IntLit)
+	if !ok {
+		t.Fatalf("expected IntLit, got %T", lp.Value)
+	}
+	if intLit.Value != "0" {
+		t.Errorf("expected 0, got %s", intLit.Value)
+	}
+
+	// Second arm: wildcard
+	_, ok = matchExpr.Arms[1].Pattern.(*ast.WildcardPattern)
+	if !ok {
+		t.Fatalf("expected WildcardPattern, got %T", matchExpr.Arms[1].Pattern)
+	}
+}
+
+func TestParseMatchVarPattern(t *testing.T) {
+	source := `fn describe(x: Int): String do
+  match x do
+    | 0 -> "zero"
+    | n -> "other"
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[0].(*ast.FnDecl)
+	matchExpr := fn.Body[0].(*ast.MatchExpr)
+
+	vp, ok := matchExpr.Arms[1].Pattern.(*ast.VarPattern)
+	if !ok {
+		t.Fatalf("expected VarPattern, got %T", matchExpr.Arms[1].Pattern)
+	}
+	if vp.Name != "n" {
+		t.Errorf("expected name 'n', got %q", vp.Name)
+	}
+}
+
+func TestParseMatchBoolPatterns(t *testing.T) {
+	source := `fn show(b: Bool): String do
+  match b do
+    | true -> "yes"
+    | false -> "no"
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[0].(*ast.FnDecl)
+	matchExpr := fn.Body[0].(*ast.MatchExpr)
+
+	if len(matchExpr.Arms) != 2 {
+		t.Fatalf("expected 2 arms, got %d", len(matchExpr.Arms))
+	}
+
+	lp0, ok := matchExpr.Arms[0].Pattern.(*ast.LiteralPattern)
+	if !ok {
+		t.Fatalf("expected LiteralPattern, got %T", matchExpr.Arms[0].Pattern)
+	}
+	bl, ok := lp0.Value.(*ast.BoolLit)
+	if !ok {
+		t.Fatalf("expected BoolLit, got %T", lp0.Value)
+	}
+	if !bl.Value {
+		t.Error("expected true")
+	}
+}

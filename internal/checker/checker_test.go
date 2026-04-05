@@ -525,3 +525,94 @@ fn main(): Int do
 end`)
 	expectNoErrors(t, errs)
 }
+
+// --- Match expression type checking ---
+
+func TestMatchSumTypeConstructors(t *testing.T) {
+	_, errs := check(`type Shape =
+  | Circle { radius: Float }
+  | Rectangle { width: Float, height: Float }
+
+fn area(s: Shape): Float do
+  match s do
+    | Circle { radius } -> radius * radius
+    | Rectangle { width, height } -> width * height
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestMatchUnitVariants(t *testing.T) {
+	_, errs := check(`type Color =
+  | Red
+  | Green
+  | Blue
+
+fn name(c: Color): String do
+  match c do
+    | Red -> "red"
+    | Green -> "green"
+    | Blue -> "blue"
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestMatchArmTypeMismatch(t *testing.T) {
+	_, errs := check(`type Shape =
+  | Circle { radius: Float }
+  | Square { side: Float }
+
+fn area(s: Shape): Float do
+  match s do
+    | Circle { radius } -> radius * radius
+    | Square { side } -> "not a float"
+  end
+end`)
+	if len(errs) == 0 {
+		t.Fatal("expected type error for mismatched arm types")
+	}
+	expectErrorContains(t, errs, "type mismatch")
+}
+
+func TestMatchVariableBinding(t *testing.T) {
+	_, errs := check(`type Wrapper =
+  | Val { inner: Int }
+
+fn unwrap(w: Wrapper): Int do
+  match w do
+    | Val { inner } -> inner + 1
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestMatchWildcardPattern(t *testing.T) {
+	_, errs := check(`type Color =
+  | Red
+  | Green
+  | Blue
+
+fn isRed(c: Color): String do
+  match c do
+    | Red -> "yes"
+    | _ -> "no"
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestMatchVarPattern(t *testing.T) {
+	_, errs := check(`type Color =
+  | Red
+  | Green
+  | Blue
+
+fn show(c: Color): String do
+  match c do
+    | Red -> "red"
+    | other -> "not red"
+  end
+end`)
+	expectNoErrors(t, errs)
+}

@@ -235,6 +235,8 @@ func (r *Resolver) resolveExpr(expr ast.Expr) {
 		r.resolveStringInterpolation(e)
 	case *ast.RecordLit:
 		r.resolveRecordLit(e)
+	case *ast.MatchExpr:
+		r.resolveMatchExpr(e)
 	case *ast.FnLit:
 		r.resolveFnLit(e)
 	}
@@ -292,6 +294,49 @@ func (r *Resolver) resolveRecordLit(e *ast.RecordLit) {
 	}
 	for _, field := range e.Fields {
 		r.resolveExpr(field.Value)
+	}
+}
+
+func (r *Resolver) resolveMatchExpr(e *ast.MatchExpr) {
+	r.resolveExpr(e.Scrutinee)
+	for _, arm := range e.Arms {
+		r.pushScope()
+		r.resolvePattern(arm.Pattern)
+		for _, stmt := range arm.Body {
+			r.resolveExpr(stmt)
+		}
+		r.popScope()
+	}
+}
+
+func (r *Resolver) resolvePattern(pat ast.Pattern) {
+	if pat == nil {
+		return
+	}
+	switch p := pat.(type) {
+	case *ast.ConstructorPattern:
+		// Resolve the constructor name
+		ref := r.current.lookup(p.Constructor)
+		if ref == nil {
+			r.error(p.Span, fmt.Sprintf("undefined variant %q", p.Constructor))
+		} else {
+			r.record(p.Span, ref)
+		}
+		// Field patterns introduce variable bindings (shorthand: field name = var name)
+		for _, fp := range p.Fields {
+			if fp.Pattern != nil {
+				r.resolvePattern(fp.Pattern)
+			} else {
+				// Shorthand: `{ radius }` binds `radius` as a local variable
+				r.current.define(fp.Name, &DeclRef{Kind: DeclLocal, Name: fp.Name, Span: fp.Span})
+			}
+		}
+	case *ast.VarPattern:
+		r.current.define(p.Name, &DeclRef{Kind: DeclLocal, Name: p.Name, Span: p.Span})
+	case *ast.WildcardPattern:
+		// nothing to resolve
+	case *ast.LiteralPattern:
+		// nothing to resolve
 	}
 }
 

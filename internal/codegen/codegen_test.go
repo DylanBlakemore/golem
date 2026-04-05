@@ -402,3 +402,91 @@ end`)
 	assertContains(t, out, "func main()")
 	assertContains(t, out, "type Point struct")
 }
+
+// --- Match expression code generation ---
+
+func TestMatchSumTypeSwitch(t *testing.T) {
+	out := generate(t, `type Shape =
+  | Circle { radius: Float }
+  | Rectangle { width: Float, height: Float }
+
+pub fn main() do
+  let s: Shape = Circle { radius: 5.0 }
+  match s do
+    | Circle { radius } -> radius * radius
+    | Rectangle { width, height } -> width * height
+  end
+end`)
+	assertContains(t, out, "switch __match := s.(type)")
+	assertContains(t, out, "case shapeCircle:")
+	assertContains(t, out, "case shapeRectangle:")
+	assertContains(t, out, "radius := __match.Radius")
+	assertContains(t, out, "width := __match.Width")
+	assertContains(t, out, "height := __match.Height")
+}
+
+func TestMatchUnitVariantCodegen(t *testing.T) {
+	out := generate(t, `type Color =
+  | Red
+  | Green
+  | Blue
+
+pub fn name(c: Color): String do
+  match c do
+    | Red -> "red"
+    | Green -> "green"
+    | Blue -> "blue"
+  end
+end`)
+	assertContains(t, out, "switch __match := c.(type)")
+	assertContains(t, out, "case colorRed:")
+	assertContains(t, out, "case colorGreen:")
+	assertContains(t, out, "case colorBlue:")
+}
+
+func TestMatchLetAssign(t *testing.T) {
+	out := generate(t, `type Shape =
+  | Circle { radius: Float }
+  | Square { side: Float }
+
+pub fn area(s: Shape): Float do
+  let result = match s do
+    | Circle { radius } -> radius * radius
+    | Square { side } -> side * side
+  end
+  result
+end`)
+	assertContains(t, out, "var result")
+	assertContains(t, out, "switch __match := s.(type)")
+	assertContains(t, out, "result =")
+}
+
+func TestMatchWildcardDefault(t *testing.T) {
+	out := generate(t, `type Color =
+  | Red
+  | Green
+  | Blue
+
+pub fn isRed(c: Color): String do
+  match c do
+    | Red -> "yes"
+    | _ -> "no"
+  end
+end`)
+	assertContains(t, out, "case colorRed:")
+	assertContains(t, out, "default:")
+}
+
+func TestMatchLiteralSwitch(t *testing.T) {
+	out := generate(t, `pub fn describe(x: Int): String do
+  match x do
+    | 0 -> "zero"
+    | 1 -> "one"
+    | _ -> "other"
+  end
+end`)
+	assertContains(t, out, "switch x {")
+	assertContains(t, out, "case 0:")
+	assertContains(t, out, "case 1:")
+	assertContains(t, out, "default:")
+}

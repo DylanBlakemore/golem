@@ -817,6 +817,9 @@ func (p *Parser) parsePrimaryExpr() ast.Expr {
 			Stmts: stmts,
 		}
 
+	case lexer.MATCH:
+		return p.parseMatchExpr()
+
 	case lexer.FN:
 		return p.parseFnLit()
 
@@ -1111,6 +1114,180 @@ func tokenToBinaryOp(kind lexer.TokenKind) ast.BinaryOp {
 		return ast.OpPipe
 	default:
 		return ast.OpAdd // unreachable
+	}
+}
+
+// --- Match expression parsing ---
+
+func (p *Parser) parseMatchExpr() *ast.MatchExpr {
+	start := p.peek().Span
+	p.advance() // consume MATCH
+
+	scrutinee := p.parseExpr()
+
+	if _, ok := p.expect(lexer.DO); !ok {
+		p.synchronize()
+		return &ast.MatchExpr{Span: start, Scrutinee: scrutinee}
+	}
+
+	p.skipNewlines()
+
+	var arms []*ast.MatchArm
+	for p.check(lexer.PIPE_CHAR) && !p.atEnd() {
+		arm := p.parseMatchArm()
+		if arm != nil {
+			arms = append(arms, arm)
+		}
+		p.skipNewlines()
+	}
+
+	end, _ := p.expect(lexer.END)
+
+	return &ast.MatchExpr{
+		Span:      spanFromTo(start, end.Span),
+		Scrutinee: scrutinee,
+		Arms:      arms,
+	}
+}
+
+func (p *Parser) parseMatchArm() *ast.MatchArm {
+	start := p.peek().Span
+	p.advance() // consume |
+
+	p.skipNewlines()
+
+	pattern := p.parsePattern()
+
+	if _, ok := p.expect(lexer.ARROW); !ok {
+		p.synchronize()
+		return nil
+	}
+
+	p.skipNewlines()
+
+	// Parse arm body: either a single expression or multiple statements until next | or end
+	var body []ast.Expr
+	for !p.check(lexer.PIPE_CHAR) && !p.check(lexer.END) && !p.atEnd() {
+		stmt := p.parseStmt()
+		if stmt != nil {
+			body = append(body, stmt)
+		}
+		p.skipNewlines()
+	}
+
+	var endSpan span.Span
+	if len(body) > 0 {
+		endSpan = body[len(body)-1].GetSpan()
+	} else {
+		endSpan = start
+	}
+
+	return &ast.MatchArm{
+		Span:    spanFromTo(start, endSpan),
+		Pattern: pattern,
+		Body:    body,
+	}
+}
+
+func (p *Parser) parsePattern() ast.Pattern {
+	tok := p.peek()
+
+	switch tok.Kind {
+	case lexer.UPPER_IDENT:
+		// Constructor pattern: Circle or Circle { radius }
+		p.advance()
+		name := tok.Literal
+
+		if p.check(lexer.LBRACE) {
+			return p.parseConstructorPattern(tok, name)
+		}
+
+		// Unit constructor pattern (no fields)
+		return &ast.ConstructorPattern{
+			Span:        tok.Span,
+			Constructor: name,
+		}
+
+	case lexer.IDENT:
+		p.advance()
+		if tok.Literal == "_" {
+			return &ast.WildcardPattern{Span: tok.Span}
+		}
+		return &ast.VarPattern{Span: tok.Span, Name: tok.Literal}
+
+	case lexer.INT_LIT:
+		p.advance()
+		return &ast.LiteralPattern{
+			Span:  tok.Span,
+			Value: &ast.IntLit{Span: tok.Span, Value: tok.Literal},
+		}
+
+	case lexer.FLOAT_LIT:
+		p.advance()
+		return &ast.LiteralPattern{
+			Span:  tok.Span,
+			Value: &ast.FloatLit{Span: tok.Span, Value: tok.Literal},
+		}
+
+	case lexer.STRING_LIT:
+		p.advance()
+		return &ast.LiteralPattern{
+			Span:  tok.Span,
+			Value: &ast.StringLit{Span: tok.Span, Value: tok.Literal},
+		}
+
+	case lexer.BOOL_LIT:
+		p.advance()
+		return &ast.LiteralPattern{
+			Span:  tok.Span,
+			Value: &ast.BoolLit{Span: tok.Span, Value: tok.Literal == "true"},
+		}
+
+	default:
+		p.error(fmt.Sprintf("expected pattern, got %s", tok.Kind))
+		p.advance()
+		return &ast.WildcardPattern{Span: tok.Span}
+	}
+}
+
+func (p *Parser) parseConstructorPattern(nameTok lexer.Token, name string) *ast.ConstructorPattern {
+	p.advance() // consume {
+	p.skipNewlines()
+
+	var fields []*ast.FieldPattern
+	for !p.check(lexer.RBRACE) && !p.atEnd() {
+		p.skipNewlines()
+		if p.check(lexer.RBRACE) {
+			break
+		}
+
+		fieldTok, ok := p.expect(lexer.IDENT)
+		if !ok {
+			p.synchronize()
+			continue
+		}
+
+		fields = append(fields, &ast.FieldPattern{
+			Span: fieldTok.Span,
+			Name: fieldTok.Literal,
+		})
+
+		if !p.check(lexer.RBRACE) {
+			if !p.match(lexer.COMMA) {
+				if !p.check(lexer.NEWLINE) && !p.check(lexer.RBRACE) {
+					p.error("expected , or } in pattern")
+				}
+			}
+		}
+		p.skipNewlines()
+	}
+
+	end, _ := p.expect(lexer.RBRACE)
+
+	return &ast.ConstructorPattern{
+		Span:        spanFromTo(nameTok.Span, end.Span),
+		Constructor: name,
+		Fields:      fields,
 	}
 }
 
