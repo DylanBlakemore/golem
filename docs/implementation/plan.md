@@ -27,7 +27,7 @@ Golem is a statically typed, expression-oriented language that transpiles to idi
   - [x] 0.5 — Type checking (monomorphic)
   - [x] 0.6 — Desugaring (basic)
   - [x] 0.7 — Code generation (basic)
-  - [ ] 0.8 — CLI (`golem build`, `golem run`)
+  - [x] 0.8 — CLI (`golem build`, `golem run`)
   - [ ] 0.9 — End-to-end integration test (HTTP server)
 
 ---

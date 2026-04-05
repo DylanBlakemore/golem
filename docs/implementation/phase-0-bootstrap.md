@@ -214,8 +214,8 @@ Reference: [code-generation.md](../architecture/code-generation.md)
 - [x] Deterministic output: declaration order matches source, sorted imports
 
 ### Output Structure
-- [ ] Write to `build/` directory mirroring source tree
-- [ ] `.golem.go` extension for generated files
+- [x] Write to `build/` directory mirroring source tree
+- [x] `.golem.go` extension for generated files
 
 ### Tests
 - [x] Snapshot tests: Golem source -> generated Go source
@@ -228,25 +228,25 @@ Reference: [code-generation.md](../architecture/code-generation.md)
 
 ## 0.8 — CLI (`golem build`, `golem run`)
 
-- [ ] CLI entrypoint in `cmd/golem/main.go`
-- [ ] `golem build` command:
+- [x] CLI entrypoint in `cmd/golem/main.go`
+- [x] `golem build` command:
   - Discover all `.golem` files in module
   - Run full pipeline (lex -> parse -> resolve -> check -> desugar -> codegen)
   - Write generated files to `build/`
   - Invoke `go build ./build/...`
   - Report errors with source locations
-- [ ] `golem run <file>` command:
+- [x] `golem run <file>` command:
   - `golem build` + execute the binary
-- [ ] Error output formatting:
+- [x] Error output formatting:
   - File path, line, column
   - Source line with caret pointing to error
   - Error message
-- [ ] `--verbose` flag for pipeline timing info
+- [x] `--verbose` flag for pipeline timing info
 
 ### Tests
-- [ ] Integration test: `golem build` on a simple project
-- [ ] Integration test: `golem run` produces expected output
-- [ ] Test error output formatting
+- [x] Integration test: `golem build` on a simple project
+- [x] Integration test: `golem run` produces expected output
+- [x] Test error output formatting
 
 ---
 
