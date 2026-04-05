@@ -1,6 +1,6 @@
 # Phase 0 — Bootstrap
 
-**Status:** In Progress
+**Status:** Complete
 **Goal:** Lexer, parser, basic type checking, code generation for core constructs, CLI skeleton.
 **Exit Criteria:** Compile a simple HTTP server written in Golem that delegates to `net/http`.
 
@@ -259,7 +259,7 @@ import "net/http"
 import "fmt"
 
 pub fn main() do
-  http.handleFunc("/", fn(w: http.ResponseWriter, r: http.Request) do
+  http.handleFunc("/", fn(w: http.ResponseWriter, r: *http.Request) do
     fmt.fprintln(w, "Hello from Golem!")
   end)
   fmt.println("Listening on :8080")
@@ -267,8 +267,8 @@ pub fn main() do
 end
 ```
 
-- [ ] This compiles without errors
-- [ ] Generated Go code is readable and idiomatic
-- [ ] Generated code passes `go vet`
-- [ ] Server runs and responds to HTTP requests
-- [ ] All Phase 0 tests pass
+- [x] This compiles without errors
+- [x] Generated Go code is readable and idiomatic
+- [x] Generated code passes `go vet`
+- [x] Server runs and responds to HTTP requests
+- [x] All Phase 0 tests pass

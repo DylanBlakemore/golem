@@ -397,6 +397,16 @@ func (p *Parser) parseLetDecl() *ast.LetDecl {
 // --- Type expressions ---
 
 func (p *Parser) parseTypeExpr() ast.TypeExpr {
+	// Handle pointer type: *Type
+	if p.check(lexer.STAR) {
+		starTok := p.advance()
+		elem := p.parseTypeExpr()
+		return &ast.PointerType{
+			Span: spanFromTo(starTok.Span, elem.GetSpan()),
+			Elem: elem,
+		}
+	}
+
 	// Handle Fn(params): ReturnType
 	if p.check(lexer.FN) {
 		return p.parseFnType()

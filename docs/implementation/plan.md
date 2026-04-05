@@ -19,7 +19,7 @@ Golem is a statically typed, expression-oriented language that transpiles to idi
 > Lexer, parser, basic type checking, code generation for core constructs, CLI skeleton.
 > **Exit Criteria:** Compile a simple HTTP server that delegates to `net/http`.
 
-- [ ] [Phase 0: Bootstrap](./phase-0-bootstrap.md)
+- [x] [Phase 0: Bootstrap](./phase-0-bootstrap.md)
   - [x] 0.1 — Project scaffolding & build infrastructure
   - [x] 0.2 — Lexer
   - [x] 0.3 — Parser
@@ -28,7 +28,7 @@ Golem is a statically typed, expression-oriented language that transpiles to idi
   - [x] 0.6 — Desugaring (basic)
   - [x] 0.7 — Code generation (basic)
   - [x] 0.8 — CLI (`golem build`, `golem run`)
-  - [ ] 0.9 — End-to-end integration test (HTTP server)
+  - [x] 0.9 — End-to-end integration test (HTTP server)
 
 ---
 

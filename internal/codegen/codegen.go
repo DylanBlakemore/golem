@@ -398,6 +398,8 @@ func (e *emitter) typeExpr(te ast.TypeExpr) string {
 		return goTypeName(t.Name)
 	case *ast.QualifiedType:
 		return t.Qualifier + "." + t.Name
+	case *ast.PointerType:
+		return "*" + e.typeExpr(t.Elem)
 	case *ast.FnType:
 		params := make([]string, len(t.ParamTypes))
 		for i, p := range t.ParamTypes {

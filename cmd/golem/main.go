@@ -125,7 +125,7 @@ func discoverGolemFiles(root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() && (info.Name() == "build" || strings.HasPrefix(info.Name(), ".")) {
+		if info.IsDir() && path != root && (info.Name() == "build" || strings.HasPrefix(info.Name(), ".")) {
 			return filepath.SkipDir
 		}
 		if !info.IsDir() && strings.HasSuffix(path, ".golem") {

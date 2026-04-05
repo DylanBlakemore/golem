@@ -596,6 +596,9 @@ func (c *Checker) resolveTypeExpr(te ast.TypeExpr) *Type {
 		}
 		ret := c.resolveTypeExpr(t.ReturnType)
 		return NewFn(params, ret)
+	case *ast.PointerType:
+		// Pointer types pass through to codegen; treat as Any for type checking.
+		return TypeAny
 	case *ast.GenericType:
 		// Phase 0: treat generic types as Any
 		return TypeAny

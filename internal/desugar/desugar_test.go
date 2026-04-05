@@ -310,7 +310,7 @@ func TestStringInterpolationNoExprs(t *testing.T) {
 		},
 	}
 	result := Desugar(mod)
-	body := fnBody(t, result.Module, "Main")
+	body := fnBody(t, result.Module, "main")
 	lit, ok := body[0].(*ast.StringLit)
 	if !ok {
 		t.Fatalf("expected StringLit, got %T", body[0])
@@ -400,7 +400,7 @@ func TestMapVisibility(t *testing.T) {
 		{"foo", ast.VisPriv, "foo"},
 		{"Foo", ast.VisPriv, "foo"},
 		{"Foo", ast.VisPub, "Foo"},
-		{"main", ast.VisPub, "Main"},
+		{"main", ast.VisPub, "main"},
 		{"main", ast.VisDefault, "main"},
 		{"", ast.VisPub, ""},
 	}

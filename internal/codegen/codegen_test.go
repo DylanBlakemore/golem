@@ -335,6 +335,6 @@ pub fn main() do
   end
 end`)
 	// Just verify it produced something reasonable.
-	assertContains(t, out, "func Main()")
+	assertContains(t, out, "func main()")
 	assertContains(t, out, "type Point struct")
 }

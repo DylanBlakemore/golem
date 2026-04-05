@@ -313,8 +313,12 @@ func (d *desugarer) desugarStringInterpolation(e *ast.StringInterpolation) ast.E
 
 // mapVisibility applies Go visibility rules to a name.
 // pub -> capitalize first letter, priv -> lowercase first letter.
+// Special case: "main" is never capitalized (Go entry point).
 func mapVisibility(name string, vis ast.Visibility) string {
 	if len(name) == 0 {
+		return name
+	}
+	if name == "main" {
 		return name
 	}
 	runes := []rune(name)

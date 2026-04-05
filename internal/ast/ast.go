@@ -138,6 +138,15 @@ type GenericType struct {
 func (*GenericType) typeExprNode()        {}
 func (t *GenericType) GetSpan() span.Span { return t.Span }
 
+// PointerType represents a pointer type like *http.Request.
+type PointerType struct {
+	Span span.Span
+	Elem TypeExpr
+}
+
+func (*PointerType) typeExprNode()        {}
+func (t *PointerType) GetSpan() span.Span { return t.Span }
+
 // FnType represents a function type like Fn(Int, Int): Int.
 type FnType struct {
 	Span       span.Span
