@@ -18,6 +18,7 @@ const (
 	DeclLocal     DeclKind = iota // let binding or function parameter
 	DeclFunction                  // top-level function
 	DeclType                      // type declaration
+	DeclVariant                   // sum type variant constructor
 	DeclImport                    // import (Go package)
 	DeclImportRef                 // qualified reference to an import member
 )
@@ -141,6 +142,17 @@ func (r *Resolver) resolve() {
 				continue
 			}
 			r.current.define(d.Name, ref)
+			// Register variant constructors for sum types
+			if sumBody, ok := d.Body.(*ast.SumTypeBody); ok {
+				for _, v := range sumBody.Variants {
+					vRef := &DeclRef{Kind: DeclVariant, Name: v.Name, Span: v.Span}
+					if existing := r.current.lookupLocal(v.Name); existing != nil {
+						r.error(v.Span, fmt.Sprintf("variant %q conflicts with existing declaration", v.Name))
+						continue
+					}
+					r.current.define(v.Name, vRef)
+				}
+			}
 		case *ast.LetDecl:
 			ref := &DeclRef{Kind: DeclLocal, Name: d.Name, Span: d.Span}
 			if existing := r.current.lookupLocal(d.Name); existing != nil {

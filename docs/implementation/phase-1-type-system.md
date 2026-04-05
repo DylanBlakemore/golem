@@ -1,6 +1,6 @@
 # Phase 1 — Type System Core
 
-**Status:** Not Started
+**Status:** In Progress
 **Depends on:** Phase 0 complete
 **Goal:** Sum types, flat pattern matching, exhaustiveness, generics, Result/Option, Go interop.
 **Exit Criteria:** Model a domain with ADTs, call Go stdlib, handle errors with `?`.
@@ -12,29 +12,29 @@
 Reference: [type-system.md](../architecture/type-system.md), [code-generation.md](../architecture/code-generation.md)
 
 ### Parsing
-- [ ] Extend parser for sum type declarations:
+- [x] Extend parser for sum type declarations:
   ```golem
   type Shape =
     | Circle { radius: Float }
     | Rectangle { width: Float, height: Float }
     | Triangle { base: Float, height: Float }
   ```
-- [ ] AST nodes: `SumTypeDecl` with list of `Variant` (name + optional fields)
-- [ ] Support variants with no fields (e.g., `| None`)
-- [ ] Support `pub`/`priv` visibility on sum type declarations
+- [x] AST nodes: `SumTypeDecl` with list of `Variant` (name + optional fields)
+- [x] Support variants with no fields (e.g., `| None`)
+- [x] Support `pub`/`priv` visibility on sum type declarations
 
 ### Name Resolution
-- [ ] Register sum type variant constructors as values in module scope
-- [ ] Variant constructors resolve to their parent sum type
-- [ ] Error: variant name conflicts with existing declaration
+- [x] Register sum type variant constructors as values in module scope
+- [x] Variant constructors resolve to their parent sum type
+- [x] Error: variant name conflicts with existing declaration
 
 ### Type Checking
-- [ ] Sum type as a `TCon` with variants tracked in type environment
-- [ ] Variant construction type-checks field types against declaration
-- [ ] Variant construction produces parent sum type (not variant type)
+- [x] Sum type as a `TCon` with variants tracked in type environment
+- [x] Variant construction type-checks field types against declaration
+- [x] Variant construction produces parent sum type (not variant type)
 
 ### Code Generation
-- [ ] Sum type -> sealed Go interface with unexported marker method:
+- [x] Sum type -> sealed Go interface with unexported marker method:
   ```go
   type Shape interface { isShape() }
   type ShapeCircle struct { Radius float64 }
@@ -42,14 +42,14 @@ Reference: [type-system.md](../architecture/type-system.md), [code-generation.md
   type ShapeRectangle struct { Width float64; Height float64 }
   func (ShapeRectangle) isShape() {}
   ```
-- [ ] Variant construction -> struct literal
-- [ ] Visibility: `pub` sum type -> exported interface + exported variant structs
+- [x] Variant construction -> struct literal
+- [x] Visibility: `pub` sum type -> exported interface + exported variant structs
 
 ### Tests
-- [ ] Parse sum type declarations (multiple variants, with/without fields)
-- [ ] Type check variant construction
-- [ ] Code gen snapshot tests for sum types
-- [ ] Generated code compiles and passes `go vet`
+- [x] Parse sum type declarations (multiple variants, with/without fields)
+- [x] Type check variant construction
+- [x] Code gen snapshot tests for sum types
+- [x] Generated code compiles and passes `go vet`
 
 ---
 

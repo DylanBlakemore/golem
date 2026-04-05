@@ -67,6 +67,24 @@ type RecordTypeBody struct {
 
 func (*RecordTypeBody) typeBodyNode() {}
 
+// SumTypeBody represents a sum type (algebraic data type) body:
+//
+//	| Circle { radius: Float }
+//	| Rectangle { width: Float, height: Float }
+type SumTypeBody struct {
+	Span     span.Span
+	Variants []*Variant
+}
+
+func (*SumTypeBody) typeBodyNode() {}
+
+// Variant represents a single variant of a sum type.
+type Variant struct {
+	Span   span.Span
+	Name   string
+	Fields []*FieldDef // nil or empty for unit variants (e.g., | None)
+}
+
 // FieldDef represents a field in a record type.
 type FieldDef struct {
 	Span span.Span

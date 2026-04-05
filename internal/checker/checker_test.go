@@ -424,6 +424,67 @@ end`)
 	expectNoErrors(t, errs)
 }
 
+// --- Sum types ---
+
+func TestSumTypeVariantConstruction(t *testing.T) {
+	_, errs := check(`type Shape =
+  | Circle { radius: Float }
+  | Rectangle { width: Float, height: Float }
+
+fn main() do
+  Circle { radius: 1.0 }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestSumTypeUnitVariant(t *testing.T) {
+	_, errs := check(`type Option =
+  | Some { value: Int }
+  | None
+
+fn main() do
+  None
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestSumTypeVariantFieldMismatch(t *testing.T) {
+	_, errs := check(`type Shape =
+  | Circle { radius: Float }
+
+fn main() do
+  Circle { radius: "hello" }
+end`)
+	expectOneError(t, errs)
+	expectErrorContains(t, errs, "type mismatch")
+}
+
+func TestSumTypeVariantMissingField(t *testing.T) {
+	_, errs := check(`type Shape =
+  | Rectangle { width: Float, height: Float }
+
+fn main() do
+  Rectangle { width: 1.0 }
+end`)
+	expectOneError(t, errs)
+	expectErrorContains(t, errs, "missing field")
+}
+
+func TestSumTypeAsParam(t *testing.T) {
+	_, errs := check(`type Shape =
+  | Circle { radius: Float }
+  | Square { side: Float }
+
+fn area(s: Shape): Float do
+  0.0
+end
+
+fn main() do
+  area(Circle { radius: 1.0 })
+end`)
+	expectNoErrors(t, errs)
+}
+
 // --- Error recovery ---
 
 func TestErrorRecoveryNoCascade(t *testing.T) {

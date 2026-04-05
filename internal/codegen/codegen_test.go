@@ -318,6 +318,70 @@ end`)
 	assertContains(t, out, "func Bar() int")
 }
 
+// --- Sum types ---
+
+func TestSumTypeCodeGen(t *testing.T) {
+	out := generate(t, `pub type Shape =
+  | Circle { radius: Float }
+  | Rectangle { width: Float, height: Float }
+
+pub fn main() do
+  42
+end`)
+	// Sealed interface
+	assertContains(t, out, "type Shape interface")
+	assertContains(t, out, "isShape()")
+	// Variant structs
+	assertContains(t, out, "type ShapeCircle struct")
+	assertContains(t, out, "Radius float64")
+	assertContains(t, out, "type ShapeRectangle struct")
+	assertContains(t, out, "Width")
+	assertContains(t, out, "Height")
+	// Marker methods
+	assertContains(t, out, "func (ShapeCircle) isShape()")
+	assertContains(t, out, "func (ShapeRectangle) isShape()")
+}
+
+func TestSumTypeUnitVariantCodeGen(t *testing.T) {
+	out := generate(t, `pub type Color =
+  | Red
+  | Green
+  | Blue
+
+pub fn main() do
+  42
+end`)
+	assertContains(t, out, "type Color interface")
+	assertContains(t, out, "type ColorRed struct")
+	assertContains(t, out, "type ColorGreen struct")
+	assertContains(t, out, "type ColorBlue struct")
+}
+
+func TestSumTypeVariantConstruction(t *testing.T) {
+	out := generate(t, `pub type Shape =
+  | Circle { radius: Float }
+
+pub fn main() do
+  Circle { radius: 1.5 }
+end`)
+	assertContains(t, out, "ShapeCircle{Radius: 1.5}")
+}
+
+func TestSumTypeGeneratesValidGo(t *testing.T) {
+	// The fact that Generate() doesn't error proves the output is valid Go syntax.
+	_ = generate(t, `pub type Shape =
+  | Circle { radius: Float }
+  | Rectangle { width: Float, height: Float }
+  | Point
+
+pub fn main() do
+  let c = Circle { radius: 3.14 }
+  let r = Rectangle { width: 10.0, height: 5.0 }
+  let p = Point
+  42
+end`)
+}
+
 func TestGoFormatProducesValidGo(t *testing.T) {
 	// The fact that Generate() doesn't error proves the output is valid Go syntax.
 	// This test exercises a more complex program.

@@ -55,6 +55,12 @@ func (d *desugarer) desugarModule(mod *ast.Module) *ast.Module {
 			}
 			goName := mapVisibility(td.Name, td.Visibility)
 			d.nameMap[td.Name] = goName
+			// Map variant constructors: Circle -> ShapeCircle (prefixed with Go type name)
+			if sumBody, ok := td.Body.(*ast.SumTypeBody); ok {
+				for _, v := range sumBody.Variants {
+					d.nameMap[v.Name] = goName + v.Name
+				}
+			}
 		}
 	}
 
@@ -85,7 +91,7 @@ func (d *desugarer) desugarDecl(decl ast.Decl) ast.Decl {
 	case *ast.LetDecl:
 		return d.desugarLetDecl(dc)
 	case *ast.TypeDecl:
-		return dc
+		return d.desugarTypeDecl(dc)
 	default:
 		return decl
 	}
@@ -102,6 +108,44 @@ func (d *desugarer) desugarFnDecl(fn *ast.FnDecl) *ast.FnDecl {
 		Params:     newParams,
 		ReturnType: fn.ReturnType,
 		Body:       newBody,
+	}
+}
+
+func (d *desugarer) desugarTypeDecl(td *ast.TypeDecl) *ast.TypeDecl {
+	goName := td.Name
+	if n, ok := d.nameMap[td.Name]; ok {
+		goName = n
+	}
+
+	var body ast.TypeBody
+	switch b := td.Body.(type) {
+	case *ast.SumTypeBody:
+		variants := make([]*ast.Variant, len(b.Variants))
+		for i, v := range b.Variants {
+			variantGoName := v.Name
+			if n, ok := d.nameMap[v.Name]; ok {
+				variantGoName = n
+			}
+			variants[i] = &ast.Variant{
+				Span:   v.Span,
+				Name:   variantGoName,
+				Fields: v.Fields,
+			}
+		}
+		body = &ast.SumTypeBody{
+			Span:     b.Span,
+			Variants: variants,
+		}
+	default:
+		body = td.Body
+	}
+
+	return &ast.TypeDecl{
+		Span:       td.Span,
+		Visibility: td.Visibility,
+		Name:       goName,
+		TypeParams: td.TypeParams,
+		Body:       body,
 	}
 }
 

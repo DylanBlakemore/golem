@@ -41,6 +41,10 @@ type Checker struct {
 	declTypes map[string]*Type
 	// recordDefs caches record type definitions
 	recordDefs map[string]*RecordType
+	// sumDefs caches sum type definitions
+	sumDefs map[string]*SumType
+	// variantToSum maps variant name -> parent sum type name
+	variantToSum map[string]string
 }
 
 // Check performs type checking on the given module with its resolution.
@@ -51,9 +55,11 @@ func Check(mod *ast.Module, res *resolver.Resolution) (*TypeInfo, []Error) {
 		info: &TypeInfo{
 			Types: make(map[string]*Type),
 		},
-		env:        newTypeEnv(nil),
-		declTypes:  make(map[string]*Type),
-		recordDefs: make(map[string]*RecordType),
+		env:          newTypeEnv(nil),
+		declTypes:    make(map[string]*Type),
+		recordDefs:   make(map[string]*RecordType),
+		sumDefs:      make(map[string]*SumType),
+		variantToSum: make(map[string]string),
 	}
 	c.check()
 	return c.info, c.errors
@@ -107,7 +113,8 @@ func (c *Checker) fnDeclType(fn *ast.FnDecl) *Type {
 }
 
 func (c *Checker) registerTypeDecl(td *ast.TypeDecl) {
-	if body, ok := td.Body.(*ast.RecordTypeBody); ok {
+	switch body := td.Body.(type) {
+	case *ast.RecordTypeBody:
 		fields := make([]*RecordField, len(body.Fields))
 		for i, f := range body.Fields {
 			fields[i] = &RecordField{
@@ -118,6 +125,27 @@ func (c *Checker) registerTypeDecl(td *ast.TypeDecl) {
 		rec := &RecordType{Name: td.Name, Fields: fields}
 		c.recordDefs[td.Name] = rec
 		c.env.define(td.Name, NewRecord(td.Name, fields))
+	case *ast.SumTypeBody:
+		variants := make([]*SumVariant, len(body.Variants))
+		for i, v := range body.Variants {
+			fields := make([]*RecordField, len(v.Fields))
+			for j, f := range v.Fields {
+				fields[j] = &RecordField{
+					Name: f.Name,
+					Type: c.resolveTypeExpr(f.Type),
+				}
+			}
+			variants[i] = &SumVariant{Name: v.Name, Fields: fields}
+			c.variantToSum[v.Name] = td.Name
+		}
+		sumDef := &SumType{Name: td.Name, Variants: variants}
+		c.sumDefs[td.Name] = sumDef
+		sumType := NewSum(td.Name, variants)
+		c.env.define(td.Name, sumType)
+		// Register each variant constructor in the env
+		for _, v := range variants {
+			c.env.define(v.Name, sumType)
+		}
 	}
 }
 
@@ -230,6 +258,12 @@ func (c *Checker) inferIdent(e *ast.Ident, env *typeEnv) *Type {
 			}
 		case resolver.DeclImport:
 			return NewQualifiedCon(ref.Name, ref.Name)
+		case resolver.DeclVariant:
+			// Unit variant constructor — produces the parent sum type
+			if sumName, ok := c.variantToSum[ref.Name]; ok {
+				sumDef := c.sumDefs[sumName]
+				return NewSum(sumName, sumDef.Variants)
+			}
 		}
 	}
 	c.error(e.Span, fmt.Sprintf("undefined variable %q", e.Name))
@@ -410,6 +444,11 @@ func (c *Checker) inferStringInterp(e *ast.StringInterpolation, env *typeEnv) *T
 }
 
 func (c *Checker) inferRecordLit(e *ast.RecordLit, env *typeEnv) *Type {
+	// Check if this is a variant constructor
+	if sumName, ok := c.variantToSum[e.Name]; ok {
+		return c.inferVariantLit(e, sumName, env)
+	}
+
 	recDef, ok := c.recordDefs[e.Name]
 	if !ok {
 		c.error(e.Span, fmt.Sprintf("undefined record type %q", e.Name))
@@ -446,6 +485,47 @@ func (c *Checker) inferRecordLit(e *ast.RecordLit, env *typeEnv) *Type {
 	}
 
 	return NewRecord(e.Name, recDef.Fields)
+}
+
+func (c *Checker) inferVariantLit(e *ast.RecordLit, sumName string, env *typeEnv) *Type {
+	sumDef := c.sumDefs[sumName]
+
+	// Find the variant definition
+	var variantDef *SumVariant
+	for _, v := range sumDef.Variants {
+		if v.Name == e.Name {
+			variantDef = v
+			break
+		}
+	}
+
+	// Build a map of expected field types
+	expected := make(map[string]*Type, len(variantDef.Fields))
+	for _, f := range variantDef.Fields {
+		expected[f.Name] = f.Type
+	}
+
+	// Check provided fields
+	provided := make(map[string]bool, len(e.Fields))
+	for _, f := range e.Fields {
+		provided[f.Name] = true
+		valType := c.inferExpr(f.Value, env)
+		if expType, ok := expected[f.Name]; ok {
+			c.unify(expType, valType, f.Span)
+		} else {
+			c.error(f.Span, fmt.Sprintf("unknown field %q on variant %s", f.Name, e.Name))
+		}
+	}
+
+	// Check for missing fields
+	for _, f := range variantDef.Fields {
+		if !provided[f.Name] {
+			c.error(e.Span, fmt.Sprintf("missing field %q in %s literal", f.Name, e.Name))
+		}
+	}
+
+	// Variant construction produces the parent sum type
+	return NewSum(sumName, sumDef.Variants)
 }
 
 func (c *Checker) inferFnLit(e *ast.FnLit, env *typeEnv) *Type {
@@ -524,6 +604,10 @@ func (c *Checker) unify(a, b *Type, s span.Span) {
 		c.unify(a.Fn.Return, b.Fn.Return, s)
 	case a.Kind == KRecord && b.Kind == KRecord:
 		c.unifyRecords(a, b, s)
+	case a.Kind == KSum && b.Kind == KSum:
+		if a.Sum.Name != b.Sum.Name {
+			c.error(s, fmt.Sprintf("type mismatch: expected %s, got %s", a.Sum.Name, b.Sum.Name))
+		}
 	default:
 		c.error(s, fmt.Sprintf("type mismatch: expected %s, got %s", a, b))
 	}
@@ -569,6 +653,15 @@ func (c *Checker) occursIn(v *TypeVar, t *Type) bool {
 		for _, f := range t.Record.Fields {
 			if c.occursIn(v, f.Type) {
 				return true
+			}
+		}
+		return false
+	case KSum:
+		for _, variant := range t.Sum.Variants {
+			for _, f := range variant.Fields {
+				if c.occursIn(v, f.Type) {
+					return true
+				}
 			}
 		}
 		return false
@@ -621,9 +714,12 @@ func (c *Checker) resolveNamedType(name string) *Type {
 		return TypeAny
 	default:
 		// Check if it's a user-defined record type
-		if _, ok := c.recordDefs[name]; ok {
-			rec := c.recordDefs[name]
+		if rec, ok := c.recordDefs[name]; ok {
 			return NewRecord(name, rec.Fields)
+		}
+		// Check if it's a user-defined sum type
+		if sum, ok := c.sumDefs[name]; ok {
+			return NewSum(name, sum.Variants)
 		}
 		return NewQualifiedCon("", name)
 	}

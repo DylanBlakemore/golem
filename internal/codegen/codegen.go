@@ -94,7 +94,8 @@ func (e *emitter) emitDecl(decl ast.Decl) {
 }
 
 func (e *emitter) emitTypeDecl(td *ast.TypeDecl) {
-	if body, ok := td.Body.(*ast.RecordTypeBody); ok {
+	switch body := td.Body.(type) {
+	case *ast.RecordTypeBody:
 		e.linef("type %s struct {", td.Name)
 		e.indent++
 		for _, f := range body.Fields {
@@ -102,6 +103,33 @@ func (e *emitter) emitTypeDecl(td *ast.TypeDecl) {
 		}
 		e.indent--
 		e.linef("}")
+	case *ast.SumTypeBody:
+		e.emitSumTypeDecl(td.Name, body)
+	}
+}
+
+func (e *emitter) emitSumTypeDecl(name string, body *ast.SumTypeBody) {
+	marker := "is" + name
+
+	// Emit the sealed interface
+	e.linef("type %s interface {", name)
+	e.indent++
+	e.linef("%s()", marker)
+	e.indent--
+	e.linef("}")
+
+	// Emit each variant struct (names already prefixed by desugarer)
+	for _, v := range body.Variants {
+		e.buf.WriteByte('\n')
+		e.linef("type %s struct {", v.Name)
+		e.indent++
+		for _, f := range v.Fields {
+			e.linef("%s %s", exportField(f.Name), e.typeExpr(f.Type))
+		}
+		e.indent--
+		e.linef("}")
+		e.buf.WriteByte('\n')
+		e.linef("func (%s) %s() {}", v.Name, marker)
 	}
 }
 

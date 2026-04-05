@@ -969,6 +969,83 @@ end`
 	}
 }
 
+// --- Sum type declarations ---
+
+func TestParseSumType(t *testing.T) {
+	mod, errs := parse(`type Shape =
+  | Circle { radius: Float }
+  | Rectangle { width: Float, height: Float }
+  | Triangle { base: Float, height: Float }`)
+	expectNoErrors(t, errs)
+
+	if len(mod.Decls) != 1 {
+		t.Fatalf("expected 1 decl, got %d", len(mod.Decls))
+	}
+	td, ok := mod.Decls[0].(*ast.TypeDecl)
+	if !ok {
+		t.Fatalf("expected TypeDecl, got %T", mod.Decls[0])
+	}
+	if td.Name != "Shape" {
+		t.Errorf("expected 'Shape', got %q", td.Name)
+	}
+
+	body, ok := td.Body.(*ast.SumTypeBody)
+	if !ok {
+		t.Fatalf("expected SumTypeBody, got %T", td.Body)
+	}
+	if len(body.Variants) != 3 {
+		t.Fatalf("expected 3 variants, got %d", len(body.Variants))
+	}
+	if body.Variants[0].Name != "Circle" {
+		t.Errorf("variant 0: expected 'Circle', got %q", body.Variants[0].Name)
+	}
+	if len(body.Variants[0].Fields) != 1 {
+		t.Errorf("Circle: expected 1 field, got %d", len(body.Variants[0].Fields))
+	}
+	if body.Variants[1].Name != "Rectangle" {
+		t.Errorf("variant 1: expected 'Rectangle', got %q", body.Variants[1].Name)
+	}
+	if len(body.Variants[1].Fields) != 2 {
+		t.Errorf("Rectangle: expected 2 fields, got %d", len(body.Variants[1].Fields))
+	}
+}
+
+func TestParseSumTypeWithUnitVariant(t *testing.T) {
+	mod, errs := parse(`type Option =
+  | Some { value: Int }
+  | None`)
+	expectNoErrors(t, errs)
+
+	td := mod.Decls[0].(*ast.TypeDecl)
+	body := td.Body.(*ast.SumTypeBody)
+	if len(body.Variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(body.Variants))
+	}
+	if body.Variants[1].Name != "None" {
+		t.Errorf("variant 1: expected 'None', got %q", body.Variants[1].Name)
+	}
+	if len(body.Variants[1].Fields) != 0 {
+		t.Errorf("None: expected 0 fields, got %d", len(body.Variants[1].Fields))
+	}
+}
+
+func TestParseSumTypeWithVisibility(t *testing.T) {
+	mod, errs := parse(`pub type Color =
+  | Red
+  | Green
+  | Blue`)
+	expectNoErrors(t, errs)
+
+	td := mod.Decls[0].(*ast.TypeDecl)
+	if td.Visibility != ast.VisPub {
+		t.Errorf("expected pub visibility")
+	}
+	body := td.Body.(*ast.SumTypeBody)
+	if len(body.Variants) != 3 {
+		t.Fatalf("expected 3 variants, got %d", len(body.Variants))
+	}
+}
+
 func TestSnapshotPipeWithCalls(t *testing.T) {
 	source := `let result = data |> transform() |> filter(pred) |> collect()`
 

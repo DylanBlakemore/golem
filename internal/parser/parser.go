@@ -311,8 +311,11 @@ func (p *Parser) parseTypeDecl(vis ast.Visibility) *ast.TypeDecl {
 
 	var endSpan span.Span
 	if body != nil {
-		if rb, ok := body.(*ast.RecordTypeBody); ok {
-			endSpan = rb.Span
+		switch b := body.(type) {
+		case *ast.RecordTypeBody:
+			endSpan = b.Span
+		case *ast.SumTypeBody:
+			endSpan = b.Span
 		}
 	}
 	if endSpan.Start.Line == 0 {
@@ -333,9 +336,69 @@ func (p *Parser) parseTypeBody() ast.TypeBody {
 	if p.check(lexer.LBRACE) {
 		return p.parseRecordTypeBody()
 	}
+	// Sum type: starts with | or newline followed by |
+	p.skipNewlines()
+	if p.check(lexer.PIPE_CHAR) {
+		return p.parseSumTypeBody()
+	}
 	p.error(fmt.Sprintf("expected type body, got %s", p.peek().Kind))
 	p.synchronize()
 	return nil
+}
+
+func (p *Parser) parseSumTypeBody() *ast.SumTypeBody {
+	start := p.peek().Span
+	var variants []*ast.Variant
+
+	for p.check(lexer.PIPE_CHAR) {
+		p.advance() // consume |
+		p.skipNewlines()
+
+		nameTok, ok := p.expect(lexer.UPPER_IDENT)
+		if !ok {
+			p.synchronize()
+			continue
+		}
+
+		var fields []*ast.FieldDef
+		if p.check(lexer.LBRACE) {
+			p.advance() // consume {
+			p.skipNewlines()
+			p.parseBraceFields("variant", func(fieldName lexer.Token) {
+				typeExpr := p.parseTypeExpr()
+				fields = append(fields, &ast.FieldDef{
+					Span: spanFromTo(fieldName.Span, typeExpr.GetSpan()),
+					Name: fieldName.Literal,
+					Type: typeExpr,
+				})
+			})
+			p.expect(lexer.RBRACE)
+		}
+
+		endSpan := nameTok.Span
+		if len(fields) > 0 {
+			endSpan = fields[len(fields)-1].Span
+		}
+
+		variants = append(variants, &ast.Variant{
+			Span:   spanFromTo(nameTok.Span, endSpan),
+			Name:   nameTok.Literal,
+			Fields: fields,
+		})
+		p.skipNewlines()
+	}
+
+	var endSpan span.Span
+	if len(variants) > 0 {
+		endSpan = variants[len(variants)-1].Span
+	} else {
+		endSpan = start
+	}
+
+	return &ast.SumTypeBody{
+		Span:     spanFromTo(start, endSpan),
+		Variants: variants,
+	}
 }
 
 func (p *Parser) parseRecordTypeBody() *ast.RecordTypeBody {

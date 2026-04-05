@@ -14,6 +14,7 @@ const (
 	KCon                    // Concrete type constructor (Int, String, etc.)
 	KFn                     // Function type (params -> return)
 	KRecord                 // Record/struct type { field: Type, ... }
+	KSum                    // Sum type (algebraic data type)
 	KError                  // Poison type for error recovery
 )
 
@@ -23,6 +24,7 @@ type Type struct {
 	Con    *ConType    // non-nil when Kind == KCon
 	Fn     *FnType     // non-nil when Kind == KFn
 	Record *RecordType // non-nil when Kind == KRecord
+	Sum    *SumType    // non-nil when Kind == KSum
 	Var    *TypeVar    // non-nil when Kind == KVar
 }
 
@@ -48,6 +50,18 @@ type RecordType struct {
 type RecordField struct {
 	Name string
 	Type *Type
+}
+
+// SumType represents a sum type (algebraic data type).
+type SumType struct {
+	Name     string
+	Variants []*SumVariant
+}
+
+// SumVariant represents a single variant of a sum type.
+type SumVariant struct {
+	Name   string
+	Fields []*RecordField // nil/empty for unit variants
 }
 
 // TypeVar represents a type variable with union-find support.
@@ -95,6 +109,15 @@ func (t *Type) String() string {
 			b.WriteString(f.Type.String())
 		}
 		return fmt.Sprintf("%s { %s }", t.Record.Name, b.String())
+	case KSum:
+		var b strings.Builder
+		for i, v := range t.Sum.Variants {
+			if i > 0 {
+				b.WriteString(" | ")
+			}
+			b.WriteString(v.Name)
+		}
+		return fmt.Sprintf("%s(%s)", t.Sum.Name, b.String())
 	case KError:
 		return "<error>"
 	default:
@@ -130,6 +153,11 @@ func NewFn(params []*Type, ret *Type) *Type {
 // NewRecord creates a record type.
 func NewRecord(name string, fields []*RecordField) *Type {
 	return &Type{Kind: KRecord, Record: &RecordType{Name: name, Fields: fields}}
+}
+
+// NewSum creates a sum type.
+func NewSum(name string, variants []*SumVariant) *Type {
+	return &Type{Kind: KSum, Sum: &SumType{Name: name, Variants: variants}}
 }
 
 // TypeError is the poison type that unifies with anything.
