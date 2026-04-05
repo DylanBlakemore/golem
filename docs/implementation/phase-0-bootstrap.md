@@ -64,15 +64,15 @@ Reference: [compiler-pipeline.md](../architecture/compiler-pipeline.md) Phase 1
 Reference: [compiler-pipeline.md](../architecture/compiler-pipeline.md) Phase 2
 
 ### AST Node Definitions (`internal/ast/`)
-- [ ] **Declarations**: `FnDecl` (name, params, return type, body, visibility), `TypeDecl` (product types only for Phase 0), `ImportDecl`, `LetDecl`
-- [ ] **Expressions**: `IntLit`, `FloatLit`, `StringLit`, `BoolLit`, `Ident`, `BinaryExpr`, `UnaryExpr`, `CallExpr`, `FieldAccessExpr`, `BlockExpr`, `IfExpr`, `StringInterpolation`
-- [ ] **Types** (syntax nodes): `NamedType`, `GenericType` (placeholder for later)
-- [ ] **Params**: `Param` with name, type annotation
-- [ ] All nodes carry `Span`
+- [x] **Declarations**: `FnDecl` (name, params, return type, body, visibility), `TypeDecl` (product types only for Phase 0), `ImportDecl`, `LetDecl`
+- [x] **Expressions**: `IntLit`, `FloatLit`, `StringLit`, `BoolLit`, `Ident`, `BinaryExpr`, `UnaryExpr`, `CallExpr`, `FieldAccessExpr`, `BlockExpr`, `IfExpr`, `StringInterpolation`
+- [x] **Types** (syntax nodes): `NamedType`, `GenericType` (placeholder for later)
+- [x] **Params**: `Param` with name, type annotation
+- [x] All nodes carry `Span`
 
 ### Parser Implementation
-- [ ] Recursive descent parser struct with token stream, position, error list
-- [ ] Pratt parsing for expressions with operator precedence:
+- [x] Recursive descent parser struct with token stream, position, error list
+- [x] Pratt parsing for expressions with operator precedence:
   - Lowest: `|>` (pipe)
   - `||` (logical or)
   - `&&` (logical and)
@@ -83,23 +83,23 @@ Reference: [compiler-pipeline.md](../architecture/compiler-pipeline.md) Phase 2
   - `*`, `/`, `%` (multiplicative)
   - Unary: `!`, `-`
   - Highest: field access (`.`), function call (`(`)
-- [ ] Parse `do`/`end` blocks
-- [ ] Parse `fn` declarations with `pub`/`priv` visibility
-- [ ] Parse `let` bindings with optional type annotation
-- [ ] Parse `if`/`else` expressions
-- [ ] Parse `import` declarations (string literal path)
-- [ ] Parse product `type` declarations (`type Point = { x: Float, y: Float }`)
-- [ ] Parse function calls (including qualified: `http.listenAndServe(...)`)
-- [ ] Parse string interpolation expressions
-- [ ] Parse pipe operator chains
-- [ ] Error recovery: synchronize to next statement boundary on parse error
+- [x] Parse `do`/`end` blocks
+- [x] Parse `fn` declarations with `pub`/`priv` visibility
+- [x] Parse `let` bindings with optional type annotation
+- [x] Parse `if`/`else` expressions
+- [x] Parse `import` declarations (string literal path)
+- [x] Parse product `type` declarations (`type Point = { x: Float, y: Float }`)
+- [x] Parse function calls (including qualified: `http.listenAndServe(...)`)
+- [x] Parse string interpolation expressions
+- [x] Parse pipe operator chains
+- [x] Error recovery: synchronize to next statement boundary on parse error
 
 ### Tests
-- [ ] Unit tests for each declaration type
-- [ ] Unit tests for each expression type
-- [ ] Operator precedence tests
-- [ ] Error recovery tests (multiple errors per file)
-- [ ] Round-trip snapshot tests (parse -> pretty print -> compare)
+- [x] Unit tests for each declaration type
+- [x] Unit tests for each expression type
+- [x] Operator precedence tests
+- [x] Error recovery tests (multiple errors per file)
+- [x] Round-trip snapshot tests (parse -> pretty print -> compare)
 
 ---
 
@@ -107,20 +107,20 @@ Reference: [compiler-pipeline.md](../architecture/compiler-pipeline.md) Phase 2
 
 Reference: [compiler-pipeline.md](../architecture/compiler-pipeline.md) Phase 3
 
-- [ ] Build module scope: collect all top-level declarations (forward references allowed)
-- [ ] Resolve local variable references (`let` bindings)
-- [ ] Resolve function references (within module)
-- [ ] Resolve import declarations (store as unresolved Go package references for now)
-- [ ] Resolve qualified identifiers (`http.get` -> import ref + member)
-- [ ] Nested scoping for `let` bindings and blocks
-- [ ] Error: undefined variable, duplicate declaration
-- [ ] Output: `ResolvedAST` with `DeclRef` pointers
+- [x] Build module scope: collect all top-level declarations (forward references allowed)
+- [x] Resolve local variable references (`let` bindings)
+- [x] Resolve function references (within module)
+- [x] Resolve import declarations (store as unresolved Go package references for now)
+- [x] Resolve qualified identifiers (`http.get` -> import ref + member)
+- [x] Nested scoping for `let` bindings and blocks
+- [x] Error: undefined variable, duplicate declaration
+- [x] Output: `ResolvedAST` with `DeclRef` pointers
 
 ### Tests
-- [ ] Test forward references between functions
-- [ ] Test scope nesting and shadowing
-- [ ] Test undefined variable errors
-- [ ] Test duplicate declaration errors
+- [x] Test forward references between functions
+- [x] Test scope nesting and shadowing
+- [x] Test undefined variable errors
+- [x] Test duplicate declaration errors
 
 ---
 
