@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dylanblakemore/golem/internal/goloader"
 )
 
 func TestDiscoverGolemFiles(t *testing.T) {
@@ -74,7 +76,7 @@ end`)
 
 	mkDir(t, filepath.Join(dir, "build"))
 
-	ok := compileFile("hello.golem", false)
+	ok := compileFile("hello.golem", false, goloader.New())
 	if !ok {
 		t.Fatal("compileFile failed")
 	}
@@ -108,7 +110,7 @@ func TestCompileFileParseError(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "bad.golem"), "fn bad( do\nend")
 	mkDir(t, filepath.Join(dir, "build"))
 
-	ok := compileFile("bad.golem", false)
+	ok := compileFile("bad.golem", false, goloader.New())
 	if ok {
 		t.Error("compileFile should fail on parse error")
 	}
@@ -124,7 +126,7 @@ func TestCompileFileTypeError(t *testing.T) {
 end`)
 	mkDir(t, filepath.Join(dir, "build"))
 
-	ok := compileFile("typeerr.golem", false)
+	ok := compileFile("typeerr.golem", false, goloader.New())
 	if ok {
 		t.Error("compileFile should fail on type error")
 	}
@@ -141,7 +143,7 @@ end`)
 	mkDir(t, filepath.Join(dir, "build"))
 
 	// Just ensure verbose mode doesn't crash.
-	ok := compileFile("hello.golem", true)
+	ok := compileFile("hello.golem", true, goloader.New())
 	if !ok {
 		t.Fatal("compileFile with verbose should succeed")
 	}
@@ -165,7 +167,7 @@ end`)
 
 	mkDir(t, filepath.Join(dir, "build"))
 
-	ok := compileFile("server.golem", false)
+	ok := compileFile("server.golem", false, goloader.New())
 	if !ok {
 		t.Fatal("HTTP server example failed to compile")
 	}

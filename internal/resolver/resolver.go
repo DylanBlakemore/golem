@@ -242,6 +242,8 @@ func (r *Resolver) resolveExpr(expr ast.Expr) {
 		r.resolveMatchExpr(e)
 	case *ast.FnLit:
 		r.resolveFnLit(e)
+	case *ast.ErrorPropagationExpr:
+		r.resolveExpr(e.Expr)
 	}
 }
 

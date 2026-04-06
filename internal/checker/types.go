@@ -199,12 +199,13 @@ var TypeError = &Type{Kind: KError}
 
 // Built-in types.
 var (
-	TypeInt    = NewCon("Int")
-	TypeFloat  = NewCon("Float")
-	TypeString = NewCon("String")
-	TypeBool   = NewCon("Bool")
-	TypeNil    = NewCon("Nil")
-	TypeAny    = NewCon("Any")
+	TypeInt     = NewCon("Int")
+	TypeFloat   = NewCon("Float")
+	TypeString  = NewCon("String")
+	TypeBool    = NewCon("Bool")
+	TypeNil     = NewCon("Nil")
+	TypeAny     = NewCon("Any")
+	TypeGoError = NewCon("Error") // the Go error interface as a Golem type
 )
 
 // --- Union-Find ---

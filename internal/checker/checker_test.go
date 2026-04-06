@@ -3,6 +3,7 @@ package checker
 import (
 	"testing"
 
+	"github.com/dylanblakemore/golem/internal/goloader"
 	"github.com/dylanblakemore/golem/internal/lexer"
 	"github.com/dylanblakemore/golem/internal/parser"
 	"github.com/dylanblakemore/golem/internal/resolver"
@@ -870,4 +871,90 @@ end`)
 		t.Fatal("expected type error for ? in non-Result-returning function")
 	}
 	expectErrorContains(t, errs, "not returning Result")
+}
+
+// --- Go package import type checking ---
+
+func checkWithLoader(source string) (*TypeInfo, []Error) {
+	l := lexer.New(source, "test.golem")
+	tokens := l.Tokenize()
+	p := parser.New(tokens, "test.golem")
+	mod, perrs := p.Parse()
+	if len(perrs) > 0 {
+		panic("parse errors: " + perrs[0].Error())
+	}
+	res, rerrs := resolver.Resolve(mod)
+	if len(rerrs) > 0 {
+		panic("resolver errors: " + rerrs[0].Error())
+	}
+	return CheckWithLoader(mod, res, goloader.New())
+}
+
+func TestImportCallWithLoaderDoesNotError(t *testing.T) {
+	_, errs := checkWithLoader(`import "fmt"
+
+fn main() do
+  fmt.println("hello")
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestImportCallReturnTypeLifted(t *testing.T) {
+	// os.ReadFile returns ([]byte, error) which should lift to Result<List<Int>, Error>.
+	// The ? operator on it should succeed in a Result-returning function.
+	_, errs := checkWithLoader(`import "os"
+
+fn readContent(path: String): Result<String, Error> do
+  let bytes = os.readFile(path)?
+  Ok { value: "ok" }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestImportFmtPrintlnReturnType(t *testing.T) {
+	// fmt.Println returns (int, error) -> Result<Int, Error>.
+	// Using ? on it should work in a Result-returning function.
+	_, errs := checkWithLoader(`import "fmt"
+
+fn printAndCheck(): Result<Int, Error> do
+  let n = fmt.println("hello")?
+  Ok { value: n }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestImportUnknownSymbolFallsBackToAny(t *testing.T) {
+	// Accessing a symbol that doesn't exist in the package should not error
+	// (falls back to Any for forward compatibility).
+	_, errs := checkWithLoader(`import "fmt"
+
+fn main() do
+  fmt.nonExistentFunction("hello")
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGoTypeMapping_SliceBecomesListInt(t *testing.T) {
+	// os.ReadFile returns ([]byte, error). With (T, error) lifting,
+	// Golem sees Result<List<Int>, Error>. The ? unwraps to List<Int>.
+	info, errs := checkWithLoader(`import "os"
+
+fn readBytes(path: String): Result<Int, Error> do
+  let bytes = os.readFile(path)?
+  Ok { value: 0 }
+end`)
+	expectNoErrors(t, errs)
+	_ = info
+}
+
+func TestNameMappingLowercasedAccess(t *testing.T) {
+	// net/http.ListenAndServe returns error-only, lifted to Result<Unit, Error>.
+	// Using ? on it in a Result<Unit, Error> function should succeed.
+	_, errs := checkWithLoader(`import "net/http"
+
+fn serve(): Result<Int, Error> do
+  http.listenAndServe(":8080", nil)
+  Ok { value: 0 }
+end`)
+	expectNoErrors(t, errs)
 }

@@ -2,8 +2,10 @@ package checker
 
 import (
 	"fmt"
+	"go/types"
 
 	"github.com/dylanblakemore/golem/internal/ast"
+	"github.com/dylanblakemore/golem/internal/goloader"
 	"github.com/dylanblakemore/golem/internal/resolver"
 	"github.com/dylanblakemore/golem/internal/span"
 )
@@ -39,6 +41,10 @@ type Checker struct {
 	warnings []Warning
 	nextID   uint64
 
+	// loader provides Go package type information for import type-checking.
+	// May be nil, in which case Go import calls are typed as Any.
+	loader *goloader.Loader
+
 	// declTypes caches the types of top-level declarations
 	declTypes map[string]*Type
 	// declSchemes caches polymorphic type schemes for top-level declarations
@@ -59,7 +65,15 @@ type Checker struct {
 }
 
 // Check performs type checking on the given module with its resolution.
+// Go import calls are typed as Any (no loader is used).
 func Check(mod *ast.Module, res *resolver.Resolution) (*TypeInfo, []Error) {
+	return CheckWithLoader(mod, res, nil)
+}
+
+// CheckWithLoader performs type checking with Go package type information.
+// When loader is non-nil, calls to imported Go packages are type-checked
+// against their actual signatures rather than returning Any.
+func CheckWithLoader(mod *ast.Module, res *resolver.Resolution, loader *goloader.Loader) (*TypeInfo, []Error) {
 	c := &Checker{
 		module: mod,
 		res:    res,
@@ -67,6 +81,7 @@ func Check(mod *ast.Module, res *resolver.Resolution) (*TypeInfo, []Error) {
 			Types: make(map[string]*Type),
 		},
 		env:           newTypeEnv(nil),
+		loader:        loader,
 		declTypes:     make(map[string]*Type),
 		declSchemes:   make(map[string]*TypeScheme),
 		recordDefs:    make(map[string]*RecordType),
@@ -591,10 +606,21 @@ func (c *Checker) inferCall(e *ast.CallExpr, env *typeEnv) *Type {
 		if ident, ok := fa.Expr.(*ast.Ident); ok {
 			ref := c.res.Lookup(ident.Span)
 			if ref != nil && ref.Kind == resolver.DeclImport {
-				// Go import call — we don't type-check Go functions in Phase 0.
-				// Infer arguments but return Any.
+				// Go import call: infer arguments (for side effects) but do not
+				// unify them against Go parameter types (variadic/any mismatch).
 				for _, arg := range e.Args {
 					c.inferExpr(arg, env)
+				}
+				// With a loader, map the return type from the Go signature.
+				if c.loader != nil {
+					if sym := c.loader.Load(ref.Name); sym != nil {
+						if goSym := sym.Symbols[fa.Field]; goSym != nil {
+							retType := c.mapGoSymbolReturnType(goSym)
+							c.record(fa.Span, retType)
+							c.record(ident.GetSpan(), TypeAny)
+							return retType
+						}
+					}
 				}
 				c.record(fa.Span, TypeAny)
 				c.record(ident.GetSpan(), TypeAny)
@@ -620,6 +646,15 @@ func (c *Checker) inferFieldAccess(e *ast.FieldAccessExpr, env *typeEnv) *Type {
 	if ident, ok := e.Expr.(*ast.Ident); ok {
 		ref := c.res.Lookup(ident.Span)
 		if ref != nil && ref.Kind == resolver.DeclImport {
+			if c.loader != nil {
+				if pkg := c.loader.Load(ref.Name); pkg != nil {
+					if goSym := pkg.Symbols[e.Field]; goSym != nil {
+						t := c.mapGoType(goSym.Obj.Type())
+						c.record(ident.GetSpan(), TypeAny)
+						return t
+					}
+				}
+			}
 			c.record(ident.GetSpan(), TypeAny)
 			return TypeAny
 		}
@@ -1270,6 +1305,179 @@ func (c *Checker) freshVar() *Type {
 
 func (c *Checker) record(s span.Span, t *Type) {
 	c.info.Types[spanKey(s)] = t
+}
+
+// --- Go type mapping ---
+
+// mapGoType converts a Go types.Type to a Golem *Type.
+// This is used when type-checking calls to imported Go packages.
+// Unknown or unsupported types fall back to Any.
+//
+//nolint:cyclop // type switch over all Go type kinds is necessarily long
+func (c *Checker) mapGoType(t types.Type) *Type {
+	switch ty := t.(type) {
+	case *types.Basic:
+		return mapBasicGoType(ty)
+	case *types.Slice:
+		return NewApp(NewCon("List"), []*Type{c.mapGoType(ty.Elem())})
+	case *types.Array:
+		return NewApp(NewCon("List"), []*Type{c.mapGoType(ty.Elem())})
+	case *types.Map:
+		return NewApp(NewCon("Map"), []*Type{c.mapGoType(ty.Key()), c.mapGoType(ty.Elem())})
+	case *types.Pointer:
+		return NewApp(NewCon("Option"), []*Type{c.mapGoType(ty.Elem())})
+	case *types.Chan:
+		return NewApp(NewCon("Chan"), []*Type{c.mapGoType(ty.Elem())})
+	case *types.Interface:
+		return TypeAny
+	case *types.Signature:
+		return c.mapGoSignature(ty)
+	case *types.Named:
+		return c.mapGoNamed(ty)
+	default:
+		return TypeAny
+	}
+}
+
+// mapGoNamed maps a named Go type to a Golem type.
+func (c *Checker) mapGoNamed(ty *types.Named) *Type {
+	if isGoErrorType(ty) {
+		return TypeGoError
+	}
+	switch u := ty.Underlying().(type) {
+	case *types.Struct:
+		return c.mapGoStruct(ty, u)
+	case *types.Interface:
+		return TypeAny
+	case *types.Signature:
+		return c.mapGoSignature(u)
+	default:
+		pkg := ""
+		if ty.Obj().Pkg() != nil {
+			pkg = ty.Obj().Pkg().Path()
+		}
+		return NewQualifiedCon(pkg, ty.Obj().Name())
+	}
+}
+
+// mapBasicGoType maps a Go basic type to a Golem primitive type.
+func mapBasicGoType(t *types.Basic) *Type {
+	switch t.Kind() {
+	case types.String:
+		return TypeString
+	case types.Bool:
+		return TypeBool
+	case types.Int, types.Int8, types.Int16, types.Int32, types.Int64,
+		types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64,
+		types.Uintptr:
+		return TypeInt
+	case types.Float32, types.Float64:
+		return TypeFloat
+	default:
+		return TypeAny
+	}
+}
+
+// mapGoSignature maps a Go function signature to a Golem function type.
+// The (T, error) convention is detected and lifted to Result<T, Error>.
+func (c *Checker) mapGoSignature(sig *types.Signature) *Type {
+	params := sig.Params()
+	results := sig.Results()
+
+	// Map parameters. Variadic last param ...T becomes List<T>.
+	paramTypes := make([]*Type, params.Len())
+	for i := range params.Len() {
+		p := params.At(i)
+		if sig.Variadic() && i == params.Len()-1 {
+			// Variadic: the param type is already []T in go/types.
+			if sl, ok := p.Type().(*types.Slice); ok {
+				paramTypes[i] = NewApp(NewCon("List"), []*Type{c.mapGoType(sl.Elem())})
+			} else {
+				paramTypes[i] = c.mapGoType(p.Type())
+			}
+		} else {
+			paramTypes[i] = c.mapGoType(p.Type())
+		}
+	}
+
+	// Map return type.
+	retType := c.mapGoResults(results)
+
+	return NewFn(paramTypes, retType)
+}
+
+// twoReturnCount is the expected number of results for the (T, error) convention.
+const twoReturnCount = 2
+
+// mapGoResults maps Go function results to a Golem return type.
+// Detects the (T, error) and error-only conventions and lifts them to Result types.
+func (c *Checker) mapGoResults(results *types.Tuple) *Type {
+	switch results.Len() {
+	case 0:
+		return TypeNil
+	case 1:
+		// error-only return -> Result<Unit, Error>
+		t := results.At(0).Type()
+		if isGoErrorType(t) {
+			resultDef := c.sumDefs[resultTypeName]
+			return NewApp(NewSum(resultTypeName, resultDef.Variants), []*Type{TypeNil, TypeGoError})
+		}
+		return c.mapGoType(t)
+	case twoReturnCount:
+		// (T, error) -> Result<T, Error>
+		if isGoErrorType(results.At(1).Type()) {
+			first := c.mapGoType(results.At(0).Type())
+			resultDef := c.sumDefs[resultTypeName]
+			return NewApp(NewSum(resultTypeName, resultDef.Variants), []*Type{first, TypeGoError})
+		}
+		// Other two-return functions -> Any (no clean Golem representation)
+		return TypeAny
+	default:
+		return TypeAny
+	}
+}
+
+// mapGoStruct maps a Go struct type to a Golem record type with lowercased field names.
+func (c *Checker) mapGoStruct(named *types.Named, st *types.Struct) *Type {
+	var fields []*RecordField
+	for f := range st.Fields() {
+		if !f.Exported() {
+			continue
+		}
+		golemName := goloader.LowercaseFirst(f.Name())
+		fields = append(fields, &RecordField{
+			Name: golemName,
+			Type: c.mapGoType(f.Type()),
+		})
+	}
+	typeName := named.Obj().Name()
+	return NewRecord(typeName, fields)
+}
+
+// mapGoSymbolReturnType extracts the return type of a Go symbol's function type.
+// For non-function symbols (vars, consts, type names), returns the mapped type directly.
+func (c *Checker) mapGoSymbolReturnType(sym *goloader.Symbol) *Type {
+	switch obj := sym.Obj.(type) {
+	case *types.Func:
+		sig, ok := obj.Type().(*types.Signature)
+		if !ok {
+			return TypeAny
+		}
+		return c.mapGoResults(sig.Results())
+	case *types.Var:
+		return c.mapGoType(obj.Type())
+	default:
+		return TypeAny
+	}
+}
+
+// isGoErrorType reports whether t is the predeclared Go error interface.
+func isGoErrorType(t types.Type) bool {
+	named, ok := t.(*types.Named)
+	if !ok {
+		return false
+	}
+	return named.Obj().Name() == "error" && named.Obj().Pkg() == nil
 }
 
 func (c *Checker) error(s span.Span, msg string) {

@@ -14,6 +14,7 @@ import (
 	"github.com/dylanblakemore/golem/internal/codegen"
 	"github.com/dylanblakemore/golem/internal/desugar"
 	"github.com/dylanblakemore/golem/internal/diagnostic"
+	"github.com/dylanblakemore/golem/internal/goloader"
 	"github.com/dylanblakemore/golem/internal/lexer"
 	"github.com/dylanblakemore/golem/internal/parser"
 	"github.com/dylanblakemore/golem/internal/resolver"
@@ -64,9 +65,11 @@ func buildCmd(args []string) int {
 		return 1
 	}
 
+	loader := goloader.New()
+
 	hadErrors := false
 	for _, file := range files {
-		if !compileFile(file, *verbose) {
+		if !compileFile(file, *verbose, loader) {
 			hadErrors = true
 		}
 	}
@@ -139,7 +142,7 @@ func discoverGolemFiles(root string) ([]string, error) {
 // compileFile runs the full compilation pipeline on a single .golem file.
 //
 //nolint:cyclop // pipeline orchestration is naturally sequential
-func compileFile(file string, verbose bool) bool {
+func compileFile(file string, verbose bool, loader *goloader.Loader) bool {
 	source, err := os.ReadFile(file)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error reading %s: %v\n", file, err)
@@ -147,7 +150,7 @@ func compileFile(file string, verbose bool) bool {
 	}
 	src := string(source)
 
-	mod, ok := frontendPipeline(file, src, verbose)
+	mod, ok := frontendPipeline(file, src, verbose, loader)
 	if !ok {
 		return false
 	}
@@ -164,7 +167,7 @@ func compileFile(file string, verbose bool) bool {
 }
 
 // frontendPipeline runs lex, parse, resolve, and type check.
-func frontendPipeline(file, src string, verbose bool) (*ast.Module, bool) {
+func frontendPipeline(file, src string, verbose bool, loader *goloader.Loader) (*ast.Module, bool) {
 	start := time.Now()
 	l := lexer.New(src, file)
 	tokens := l.Tokenize()
@@ -194,7 +197,7 @@ func frontendPipeline(file, src string, verbose bool) (*ast.Module, bool) {
 	}
 
 	start = time.Now()
-	info, cerrs := checker.Check(mod, res)
+	info, cerrs := checker.CheckWithLoader(mod, res, loader)
 	if verbose {
 		fmt.Fprintf(os.Stderr, "[check] %s: %s\n", file, time.Since(start))
 	}

@@ -254,12 +254,12 @@ Reference: [error-handling.md](../architecture/error-handling.md)
 Reference: [go-interop.md](../architecture/go-interop.md)
 
 ### Go Package Loader
-- [ ] Use `golang.org/x/tools/go/packages.Load()` to load Go package metadata
-- [ ] Extract exported type signatures via `go/types`
-- [ ] Cache by `(import path, module version)`
+- [x] Use `golang.org/x/tools/go/packages.Load()` to load Go package metadata
+- [x] Extract exported type signatures via `go/types`
+- [x] Cache by import path
 
 ### Type Mapper
-- [ ] Implement Go -> Golem type mapping:
+- [x] Implement Go -> Golem type mapping:
 
   | Go Type | Golem Type |
   |---|---|
@@ -278,20 +278,20 @@ Reference: [go-interop.md](../architecture/go-interop.md)
   | Go struct | Golem record (exported fields, lowercased names) |
 
 ### Name Mapping
-- [ ] Go exported symbols accessed with first letter lowercased in Golem
-- [ ] Code gen maps back to capitalized Go names
-- [ ] Handle qualified access: `http.listenAndServe` -> `http.ListenAndServe`
+- [x] Go exported symbols accessed with first letter lowercased in Golem
+- [x] Code gen maps back to capitalized Go names
+- [x] Handle qualified access: `http.listenAndServe` -> `http.ListenAndServe`
 
 ### Integration with Name Resolution
-- [ ] Import declarations resolved to Go package metadata
-- [ ] Qualified identifiers type-checked against Go package signatures
+- [x] Import declarations resolved to Go package metadata
+- [x] Qualified identifiers type-checked against Go package signatures
 
 ### Tests
-- [ ] Test type mapping for each Go type category
-- [ ] Test Go stdlib package loading (`fmt`, `net/http`, `os`)
-- [ ] Test name mapping (lowercased access -> capitalized output)
-- [ ] Test struct field mapping
-- [ ] Integration test: call Go stdlib functions from Golem
+- [x] Test type mapping for each Go type category
+- [x] Test Go stdlib package loading (`fmt`, `net/http`, `os`)
+- [x] Test name mapping (lowercased access -> capitalized output)
+- [x] Test struct field mapping
+- [x] Integration test: call Go stdlib functions from Golem
 
 ---
 
