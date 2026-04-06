@@ -53,6 +53,9 @@ type Checker struct {
 	typeParamDefs map[string][]string
 	// typeParamEnv maps type param name -> type var during generic type registration
 	typeParamEnv map[string]*Type
+	// currentReturnType is the return type of the function currently being checked.
+	// Used to validate ? operator usage.
+	currentReturnType *Type
 }
 
 // Check performs type checking on the given module with its resolution.
@@ -155,6 +158,12 @@ func (c *Checker) fnDeclType(fn *ast.FnDecl) *Type {
 	return fnType
 }
 
+// resultTypeName is the name of the built-in Result sum type.
+const resultTypeName = "Result"
+
+// resultArgCount is the number of type arguments for Result<T, E>.
+const resultArgCount = 2
+
 // registerBuiltinTypes pre-registers Result<T, E> and Option<T> as built-in
 // sum types so they are available without user declarations.
 func (c *Checker) registerBuiltinTypes() {
@@ -185,14 +194,14 @@ func (c *Checker) registerBuiltinTypes() {
 			{Name: "Ok", Fields: []*RecordField{{Name: "value", Type: tvT}}},
 			{Name: "Err", Fields: []*RecordField{{Name: "error", Type: tvE}}},
 		}
-		resultDef := &SumType{Name: "Result", Variants: resultVariants}
-		c.sumDefs["Result"] = resultDef
-		c.typeParamDefs["Result"] = []string{"T", "E"}
-		c.variantToSum["Ok"] = "Result"
-		c.variantToSum["Err"] = "Result"
+		resultDef := &SumType{Name: resultTypeName, Variants: resultVariants}
+		c.sumDefs[resultTypeName] = resultDef
+		c.typeParamDefs[resultTypeName] = []string{"T", "E"}
+		c.variantToSum["Ok"] = resultTypeName
+		c.variantToSum["Err"] = resultTypeName
 
-		resultType := NewApp(NewSum("Result", resultVariants), []*Type{tvT, tvE})
-		c.env.define("Result", resultType)
+		resultType := NewApp(NewSum(resultTypeName, resultVariants), []*Type{tvT, tvE})
+		c.env.define(resultTypeName, resultType)
 		c.env.define("Ok", resultType)
 		c.env.define("Err", resultType)
 	}
@@ -274,7 +283,12 @@ func (c *Checker) checkFnDecl(fn *ast.FnDecl) {
 		env.define(p.Name, fnType.Fn.Params[i])
 	}
 
+	// Track the return type so ? operator can validate it.
+	prev := c.currentReturnType
+	c.currentReturnType = fnType.Fn.Return
 	bodyType := c.checkBody(fn.Body, env)
+	c.currentReturnType = prev
+
 	if bodyType != nil {
 		c.unify(fnType.Fn.Return, bodyType, fn.Span)
 	}
@@ -352,11 +366,72 @@ func (c *Checker) inferExprKind(expr ast.Expr, env *typeEnv) *Type {
 		return c.inferRecordLit(e, env)
 	case *ast.FnLit:
 		return c.inferFnLit(e, env)
+	case *ast.ErrorPropagationExpr:
+		return c.inferErrorPropagation(e, env)
 	case *ast.BadExpr:
 		return TypeError
 	default:
 		return TypeError
 	}
+}
+
+// inferErrorPropagation type-checks the ? operator.
+// expr? requires expr : Result<T, E> and returns type T.
+// The enclosing function must return Result<_, E> with a compatible error type.
+func (c *Checker) inferErrorPropagation(e *ast.ErrorPropagationExpr, env *typeEnv) *Type {
+	exprType := c.inferExpr(e.Expr, env)
+	resolved := Find(exprType)
+
+	if resolved.Kind == KError {
+		return TypeError
+	}
+
+	// The expression must have type Result<T, E>.
+	if resolved.Kind != KApp {
+		c.error(e.Span, fmt.Sprintf("? operator requires Result<T, E> type, got %s", resolved))
+		return TypeError
+	}
+
+	con := Find(resolved.App.Con)
+	if con.Kind != KSum || con.Sum.Name != resultTypeName {
+		c.error(e.Span, fmt.Sprintf("? operator requires Result<T, E> type, got %s", resolved))
+		return TypeError
+	}
+
+	if len(resolved.App.Args) != resultArgCount {
+		return TypeError
+	}
+
+	T := resolved.App.Args[0]
+	E := resolved.App.Args[1]
+
+	// Validate that the enclosing function returns Result<_, E>.
+	if c.currentReturnType == nil {
+		c.error(e.Span, "? operator used outside a function")
+		return T
+	}
+
+	retResolved := Find(c.currentReturnType)
+	switch retResolved.Kind {
+	case KVar:
+		// Return type is not yet constrained — unify with Result<freshVar, E>.
+		freshT := c.freshVar()
+		resultDef := c.sumDefs[resultTypeName]
+		c.unify(c.currentReturnType, NewApp(NewSum(resultTypeName, resultDef.Variants), []*Type{freshT, E}), e.Span)
+	case KApp:
+		retCon := Find(retResolved.App.Con)
+		if retCon.Kind == KSum && retCon.Sum.Name == resultTypeName && len(retResolved.App.Args) == resultArgCount {
+			c.unify(E, retResolved.App.Args[1], e.Span)
+		} else {
+			c.error(e.Span, "? operator used in function not returning Result<T, E>")
+		}
+	case KError:
+		// Already errored elsewhere.
+	default:
+		c.error(e.Span, "? operator used in function not returning Result<T, E>")
+	}
+
+	return T
 }
 
 func (c *Checker) inferIdent(e *ast.Ident, env *typeEnv) *Type {

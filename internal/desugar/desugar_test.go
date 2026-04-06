@@ -432,3 +432,120 @@ func findFn(t *testing.T, mod *ast.Module, name string) *ast.FnDecl {
 	}
 	return nil
 }
+
+// --- Error propagation (? operator) hoisting ---
+
+func TestErrorPropagationHoistsToLetAndMatch(t *testing.T) {
+	mod := parse(`fn readContent(path: String): Result<String, String> do
+  let content = readFile(path)?
+  content
+end`)
+	result := Desugar(mod)
+	body := fnBody(t, result.Module, "readContent")
+
+	// After hoisting, body should have:
+	// 1. let __golem_tmp0 = readFile(path)
+	// 2. let __golem_tmp1 = match __golem_tmp0 do | ResultOk {value} -> value | ResultErr {error} -> return ResultErr{...} end
+	// 3. let content = __golem_tmp1
+	// 4. content (the original last expression)
+	if len(body) < 4 {
+		t.Fatalf("expected at least 4 statements after hoisting, got %d", len(body))
+	}
+
+	// First stmt: let __golem_tmp0 = readFile(path)
+	let0, ok := body[0].(*ast.LetExpr)
+	if !ok {
+		t.Fatalf("body[0]: expected LetExpr, got %T", body[0])
+	}
+	if !isGolemTmp(let0.Name) {
+		t.Errorf("body[0]: expected golem tmp name, got %q", let0.Name)
+	}
+	if _, ok := let0.Value.(*ast.CallExpr); !ok {
+		t.Fatalf("body[0]: expected CallExpr value, got %T", let0.Value)
+	}
+
+	// Second stmt: let __golem_tmp1 = match __golem_tmp0 do ...
+	let1, ok := body[1].(*ast.LetExpr)
+	if !ok {
+		t.Fatalf("body[1]: expected LetExpr, got %T", body[1])
+	}
+	if !isGolemTmp(let1.Name) {
+		t.Errorf("body[1]: expected golem tmp name, got %q", let1.Name)
+	}
+	matchExpr, ok := let1.Value.(*ast.MatchExpr)
+	if !ok {
+		t.Fatalf("body[1]: expected MatchExpr value, got %T", let1.Value)
+	}
+	if len(matchExpr.Arms) != 2 {
+		t.Fatalf("match expr: expected 2 arms, got %d", len(matchExpr.Arms))
+	}
+
+	// Ok arm: | ResultOk { value } -> value
+	okArm := matchExpr.Arms[0]
+	okPat, ok := okArm.Pattern.(*ast.ConstructorPattern)
+	if !ok {
+		t.Fatalf("ok arm: expected ConstructorPattern, got %T", okArm.Pattern)
+	}
+	if okPat.Constructor != "ResultOk" {
+		t.Errorf("ok arm: expected ResultOk, got %q", okPat.Constructor)
+	}
+
+	// Err arm: | ResultErr { error } -> return ResultErr { error: error }
+	errArm := matchExpr.Arms[1]
+	errPat, ok := errArm.Pattern.(*ast.ConstructorPattern)
+	if !ok {
+		t.Fatalf("err arm: expected ConstructorPattern, got %T", errArm.Pattern)
+	}
+	if errPat.Constructor != "ResultErr" {
+		t.Errorf("err arm: expected ResultErr, got %q", errPat.Constructor)
+	}
+	retExpr, ok := errArm.Body[0].(*ast.ReturnExpr)
+	if !ok {
+		t.Fatalf("err arm body: expected ReturnExpr, got %T", errArm.Body[0])
+	}
+	retLit, ok := retExpr.Value.(*ast.RecordLit)
+	if !ok {
+		t.Fatalf("err arm return value: expected RecordLit, got %T", retExpr.Value)
+	}
+	if retLit.Name != "ResultErr" {
+		t.Errorf("err arm return: expected ResultErr, got %q", retLit.Name)
+	}
+
+	// Third stmt: let content = __golem_tmp1
+	let2, ok := body[2].(*ast.LetExpr)
+	if !ok {
+		t.Fatalf("body[2]: expected LetExpr, got %T", body[2])
+	}
+	if let2.Name != "content" {
+		t.Errorf("body[2]: expected name 'content', got %q", let2.Name)
+	}
+	valIdent, ok := let2.Value.(*ast.Ident)
+	if !ok {
+		t.Fatalf("body[2]: expected Ident value, got %T", let2.Value)
+	}
+	if !isGolemTmp(valIdent.Name) {
+		t.Errorf("body[2]: expected golem tmp ident, got %q", valIdent.Name)
+	}
+}
+
+func TestErrorPropagationChainedHoisting(t *testing.T) {
+	mod := parse(`fn process(path: String): Result<String, String> do
+  let a = readFile(path)?
+  let b = transform(a)?
+  b
+end`)
+	result := Desugar(mod)
+	body := fnBody(t, result.Module, "process")
+
+	// Two ? operators produce 6 statements before the final 'b':
+	// 2 hoisted pairs + 2 lets + 'b'
+	if len(body) < 5 {
+		t.Fatalf("expected at least 5 statements for two ? operators, got %d", len(body))
+	}
+}
+
+// isGolemTmp checks if a name is a generated golem temporary variable.
+func isGolemTmp(name string) bool {
+	const prefix = "__golem_tmp"
+	return len(name) >= len(prefix) && name[:len(prefix)] == prefix
+}

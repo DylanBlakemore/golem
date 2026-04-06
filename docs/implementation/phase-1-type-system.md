@@ -204,17 +204,17 @@ Reference: [error-handling.md](../architecture/error-handling.md)
 Reference: [error-handling.md](../architecture/error-handling.md)
 
 ### Parsing
-- [ ] Postfix `?` operator on expressions: `File.read(path)?`
-- [ ] Precedence: binds tighter than binary operators
+- [x] Postfix `?` operator on expressions: `File.read(path)?`
+- [x] Precedence: binds tighter than binary operators
 
 ### Type Checking
-- [ ] `expr?` requires `expr` to have type `Result<T, E>`
-- [ ] Result type of `expr?` is `T` (the unwrapped Ok value)
-- [ ] Enclosing function must return `Result<_, E>` with compatible error type
-- [ ] Error if `?` used outside a function returning Result
+- [x] `expr?` requires `expr` to have type `Result<T, E>`
+- [x] Result type of `expr?` is `T` (the unwrapped Ok value)
+- [x] Enclosing function must return `Result<_, E>` with compatible error type
+- [x] Error if `?` used outside a function returning Result
 
 ### Desugaring
-- [ ] `?` operator hoisting:
+- [x] `?` operator hoisting:
   ```golem
   let content = File.read(path)?
   ```
@@ -226,25 +226,26 @@ Reference: [error-handling.md](../architecture/error-handling.md)
     | Err { error } -> return Err { error: error }
   end
   ```
-- [ ] Works in expression position (hoisted to statement level)
-- [ ] Supports chaining: `a()?.b()?` — left-to-right with nested match hoisting
+- [x] Works in expression position (hoisted to statement level)
+- [x] Supports chaining: `a()?.b()?` — left-to-right with nested match hoisting
 
 ### Code Generation
-- [ ] Desugared form generates Go `if` with type assertion and early return:
+- [x] Desugared form generates Go type switch with early return:
   ```go
-  tmp := fileRead(path)
-  if err, ok := tmp.(ResultErr[Config, Error]); ok {
-      return ResultErr[Config, Error]{Error: err.Error}
+  switch __match := tmp.(type) {
+  case ResultOk[...]:
+      content = __match.Value
+  case ResultErr[...]:
+      return ResultErr[...]{Error: __match.Error}
   }
-  content := tmp.(ResultOk[Config, Error]).Value
   ```
 
 ### Tests
-- [ ] Test `?` on Result-typed expressions
-- [ ] Test `?` chaining
-- [ ] Test error: `?` used in non-Result-returning function
-- [ ] Test desugaring output
-- [ ] Code gen snapshot tests
+- [x] Test `?` on Result-typed expressions
+- [x] Test `?` chaining
+- [x] Test error: `?` used in non-Result-returning function
+- [x] Test desugaring output
+- [x] Code gen snapshot tests
 
 ---
 

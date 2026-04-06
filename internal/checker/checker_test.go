@@ -814,3 +814,60 @@ end`)
 	}
 	expectErrorContains(t, errs, "non-exhaustive")
 }
+
+// --- Error propagation (? operator) ---
+
+func TestErrorPropagationOnResult(t *testing.T) {
+	_, errs := check(`fn process(path: String): Result<String, String> do
+  let content = readFile(path)?
+  Ok { value: content }
+end
+
+fn readFile(path: String): Result<String, String> do
+  Ok { value: path }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestErrorPropagationChained(t *testing.T) {
+	_, errs := check(`fn process(path: String): Result<String, String> do
+  let content = readFile(path)?
+  let parsed = transform(content)?
+  Ok { value: parsed }
+end
+
+fn readFile(path: String): Result<String, String> do
+  Ok { value: path }
+end
+
+fn transform(s: String): Result<String, String> do
+  Ok { value: s }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestErrorPropagationRequiresResult(t *testing.T) {
+	_, errs := check(`fn process(n: Int): String do
+  let x = n?
+  x
+end`)
+	if len(errs) == 0 {
+		t.Fatal("expected type error for ? on non-Result type")
+	}
+	expectErrorContains(t, errs, "requires Result")
+}
+
+func TestErrorPropagationOutsideResultFunction(t *testing.T) {
+	_, errs := check(`fn process(path: String): String do
+  let content = readFile(path)?
+  content
+end
+
+fn readFile(path: String): Result<String, String> do
+  Ok { value: path }
+end`)
+	if len(errs) == 0 {
+		t.Fatal("expected type error for ? in non-Result-returning function")
+	}
+	expectErrorContains(t, errs, "not returning Result")
+}

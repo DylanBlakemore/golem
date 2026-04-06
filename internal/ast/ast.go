@@ -477,6 +477,16 @@ type LiteralPattern struct {
 func (*LiteralPattern) patternNode()         {}
 func (p *LiteralPattern) GetSpan() span.Span { return p.Span }
 
+// ErrorPropagationExpr represents the ? operator for Result error propagation.
+// `expr?` unwraps Ok or returns Err from the enclosing function.
+type ErrorPropagationExpr struct {
+	Span span.Span
+	Expr Expr
+}
+
+func (*ErrorPropagationExpr) exprNode()            {}
+func (e *ErrorPropagationExpr) GetSpan() span.Span { return e.Span }
+
 // BadExpr represents a parse error placeholder.
 type BadExpr struct {
 	Span span.Span

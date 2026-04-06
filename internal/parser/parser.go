@@ -783,6 +783,15 @@ func (p *Parser) parseExprBP(minBP int) ast.Expr {
 		}
 	}
 
+	// Handle postfix ? operator (error propagation).
+	for p.check(lexer.QUESTION) {
+		questionTok := p.advance()
+		left = &ast.ErrorPropagationExpr{
+			Span: spanFromTo(left.GetSpan(), questionTok.Span),
+			Expr: left,
+		}
+	}
+
 	return left
 }
 

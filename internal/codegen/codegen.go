@@ -568,7 +568,13 @@ func (e *emitter) emitMatchArmAssign(name string, body []ast.Expr) {
 	for _, stmt := range body[:len(body)-1] {
 		e.emitStmt(stmt)
 	}
-	e.linef("%s = %s", name, e.exprString(body[len(body)-1]))
+	last := body[len(body)-1]
+	// If the last statement is a return, emit it as a statement rather than an assignment.
+	if _, isReturn := last.(*ast.ReturnExpr); isReturn {
+		e.emitStmt(last)
+		return
+	}
+	e.linef("%s = %s", name, e.exprString(last))
 }
 
 func (e *emitter) matchExprIIFE(me *ast.MatchExpr) string {

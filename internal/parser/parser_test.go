@@ -1339,3 +1339,90 @@ end`)
 		t.Fatalf("expected 2 type args, got %d", len(retType.TypeArgs))
 	}
 }
+
+// --- Error propagation (? operator) ---
+
+func TestParseErrorPropagationSimple(t *testing.T) {
+	mod, errs := parse(`fn readContent(path: String): Result<String, String> do
+  let content = readFile(path)?
+  content
+end`)
+	expectNoErrors(t, errs)
+
+	fn, ok := mod.Decls[0].(*ast.FnDecl)
+	if !ok {
+		t.Fatalf("expected FnDecl, got %T", mod.Decls[0])
+	}
+	let, ok := fn.Body[0].(*ast.LetExpr)
+	if !ok {
+		t.Fatalf("expected LetExpr, got %T", fn.Body[0])
+	}
+	prop, ok := let.Value.(*ast.ErrorPropagationExpr)
+	if !ok {
+		t.Fatalf("expected ErrorPropagationExpr, got %T", let.Value)
+	}
+	call, ok := prop.Expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected CallExpr inside ?, got %T", prop.Expr)
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok {
+		t.Fatalf("expected Ident func, got %T", call.Func)
+	}
+	if ident.Name != "readFile" {
+		t.Errorf("expected readFile, got %s", ident.Name)
+	}
+}
+
+func TestParseErrorPropagationChained(t *testing.T) {
+	mod, errs := parse(`fn process(path: String): Result<String, String> do
+  let a = readFile(path)?
+  let b = parseContent(a)?
+  b
+end`)
+	expectNoErrors(t, errs)
+
+	fn, ok := mod.Decls[0].(*ast.FnDecl)
+	if !ok {
+		t.Fatalf("expected FnDecl, got %T", mod.Decls[0])
+	}
+	// Both lets should have ErrorPropagationExpr values
+	let1, ok := fn.Body[0].(*ast.LetExpr)
+	if !ok {
+		t.Fatalf("expected LetExpr, got %T", fn.Body[0])
+	}
+	if _, ok := let1.Value.(*ast.ErrorPropagationExpr); !ok {
+		t.Fatalf("expected ErrorPropagationExpr in first let, got %T", let1.Value)
+	}
+	let2, ok := fn.Body[1].(*ast.LetExpr)
+	if !ok {
+		t.Fatalf("expected LetExpr, got %T", fn.Body[1])
+	}
+	if _, ok := let2.Value.(*ast.ErrorPropagationExpr); !ok {
+		t.Fatalf("expected ErrorPropagationExpr in second let, got %T", let2.Value)
+	}
+}
+
+func TestParseErrorPropagationOnFieldAccess(t *testing.T) {
+	mod, errs := parse(`fn getResult(): Result<String, String> do
+  let x = foo.bar()?
+  x
+end`)
+	expectNoErrors(t, errs)
+
+	fn, ok := mod.Decls[0].(*ast.FnDecl)
+	if !ok {
+		t.Fatalf("expected FnDecl, got %T", mod.Decls[0])
+	}
+	let, ok := fn.Body[0].(*ast.LetExpr)
+	if !ok {
+		t.Fatalf("expected LetExpr, got %T", fn.Body[0])
+	}
+	prop, ok := let.Value.(*ast.ErrorPropagationExpr)
+	if !ok {
+		t.Fatalf("expected ErrorPropagationExpr, got %T", let.Value)
+	}
+	if _, ok := prop.Expr.(*ast.CallExpr); !ok {
+		t.Fatalf("expected CallExpr inside ?, got %T", prop.Expr)
+	}
+}

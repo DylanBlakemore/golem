@@ -5,9 +5,11 @@
 //   - String interpolation: "Hello, #{name}" -> fmt.Sprintf("Hello, %v", name)
 //   - Implicit priv: bare fn -> explicit VisPriv
 //   - Visibility mapping: pub -> capitalize, priv -> lowercase
+//   - ? operator: error propagation hoisted to match expressions
 package desugar
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -35,8 +37,16 @@ func Desugar(mod *ast.Module) *Result {
 }
 
 type desugarer struct {
-	needsFmt bool
-	nameMap  map[string]string // original fn name -> Go-visible name
+	needsFmt   bool
+	nameMap    map[string]string // original fn name -> Go-visible name
+	tmpCounter int               // counter for generating unique temp variable names
+}
+
+// freshTmpName generates a unique temporary variable name for ? hoisting.
+func (d *desugarer) freshTmpName() string {
+	n := d.tmpCounter
+	d.tmpCounter++
+	return fmt.Sprintf("__golem_tmp%d", n)
 }
 
 func (d *desugarer) desugarModule(mod *ast.Module) *ast.Module {
@@ -216,11 +226,128 @@ func (d *desugarer) desugarTypeExpr(te ast.TypeExpr) ast.TypeExpr {
 }
 
 func (d *desugarer) desugarExprs(exprs []ast.Expr) []ast.Expr {
-	result := make([]ast.Expr, len(exprs))
-	for i, e := range exprs {
-		result[i] = d.desugarExpr(e)
+	var result []ast.Expr
+	for _, e := range exprs {
+		// Hoist any ? operators before desugaring the expression.
+		hoisted, final := d.hoistErrorProps(e)
+		for _, h := range hoisted {
+			result = append(result, d.desugarExpr(h))
+		}
+		result = append(result, d.desugarExpr(final))
 	}
 	return result
+}
+
+// hoistErrorProps walks expr, replaces each ErrorPropagationExpr with a temp
+// variable, and returns the list of statements to prepend plus the transformed
+// expression. Returns (nil, expr) when there are no ? operators in expr.
+func (d *desugarer) hoistErrorProps(expr ast.Expr) ([]ast.Expr, ast.Expr) {
+	switch e := expr.(type) {
+	case *ast.ErrorPropagationExpr:
+		return d.hoistErrorPropExpr(e)
+
+	case *ast.LetExpr:
+		hoisted, newVal := d.hoistErrorProps(e.Value)
+		if len(hoisted) == 0 {
+			return nil, expr
+		}
+		return hoisted, &ast.LetExpr{
+			Span: e.Span, Name: e.Name, TypeAnno: e.TypeAnno, Value: newVal,
+		}
+
+	case *ast.CallExpr:
+		var allHoisted []ast.Expr
+		fnHoisted, newFn := d.hoistErrorProps(e.Func)
+		allHoisted = append(allHoisted, fnHoisted...)
+		changed := len(fnHoisted) > 0
+		newArgs := make([]ast.Expr, len(e.Args))
+		for i, arg := range e.Args {
+			argHoisted, newArg := d.hoistErrorProps(arg)
+			allHoisted = append(allHoisted, argHoisted...)
+			newArgs[i] = newArg
+			if len(argHoisted) > 0 {
+				changed = true
+			}
+		}
+		if !changed {
+			return nil, expr
+		}
+		return allHoisted, &ast.CallExpr{Span: e.Span, Func: newFn, Args: newArgs}
+
+	case *ast.FieldAccessExpr:
+		hoisted, newInner := d.hoistErrorProps(e.Expr)
+		if len(hoisted) == 0 {
+			return nil, expr
+		}
+		return hoisted, &ast.FieldAccessExpr{Span: e.Span, Expr: newInner, Field: e.Field}
+
+	default:
+		return nil, expr
+	}
+}
+
+// hoistErrorPropExpr handles the ErrorPropagationExpr case of hoistErrorProps.
+// It generates the temp variables and match expression for a single ? operator.
+func (d *desugarer) hoistErrorPropExpr(e *ast.ErrorPropagationExpr) ([]ast.Expr, ast.Expr) {
+	// Recursively hoist from the inner expression first.
+	innerHoisted, innerExpr := d.hoistErrorProps(e.Expr)
+
+	// Temp variable to hold the raw Result value.
+	tmpName := d.freshTmpName()
+	// Temp variable to hold the unwrapped Ok value.
+	valName := d.freshTmpName()
+
+	// let tmpName = innerExpr
+	letTmp := &ast.LetExpr{Span: e.Span, Name: tmpName, Value: innerExpr}
+
+	// Build the match expression:
+	//   match tmpName do
+	//     | Ok { value } -> value
+	//     | Err { error } -> return Err { error: error }
+	//   end
+	matchExpr := &ast.MatchExpr{
+		Span:      e.Span,
+		Scrutinee: &ast.Ident{Span: e.Span, Name: tmpName},
+		Arms: []*ast.MatchArm{
+			{
+				Span: e.Span,
+				Pattern: &ast.ConstructorPattern{
+					Span:        e.Span,
+					Constructor: "Ok",
+					Fields:      []*ast.FieldPattern{{Span: e.Span, Name: "value"}},
+				},
+				Body: []ast.Expr{&ast.Ident{Span: e.Span, Name: "value"}},
+			},
+			{
+				Span: e.Span,
+				Pattern: &ast.ConstructorPattern{
+					Span:        e.Span,
+					Constructor: "Err",
+					Fields:      []*ast.FieldPattern{{Span: e.Span, Name: "error"}},
+				},
+				Body: []ast.Expr{
+					&ast.ReturnExpr{
+						Span: e.Span,
+						Value: &ast.RecordLit{
+							Span: e.Span,
+							Name: "Err",
+							Fields: []*ast.FieldInit{{
+								Span:  e.Span,
+								Name:  "error",
+								Value: &ast.Ident{Span: e.Span, Name: "error"},
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// let valName = match tmpName do ... end
+	letVal := &ast.LetExpr{Span: e.Span, Name: valName, Value: matchExpr}
+
+	innerHoisted = append(innerHoisted, letTmp, letVal)
+	return innerHoisted, &ast.Ident{Span: e.Span, Name: valName}
 }
 
 //nolint:funlen // type-switch over AST nodes is naturally long
@@ -331,6 +458,10 @@ func (d *desugarer) desugarExpr(expr ast.Expr) ast.Expr {
 
 	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.BoolLit, *ast.NilLit, *ast.BadExpr:
 		return e
+
+	case *ast.ErrorPropagationExpr:
+		// Should have been hoisted in desugarExprs; handle gracefully if reached directly.
+		return d.desugarExpr(e.Expr)
 
 	default:
 		return expr

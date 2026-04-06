@@ -598,3 +598,44 @@ end`)
 	assertNotContains(t, out, "type Result")
 	assertNotContains(t, out, "type Option")
 }
+
+// --- Error propagation (? operator) code generation ---
+
+func TestErrorPropagationCodeGen(t *testing.T) {
+	out := generate(t, `pub fn readContent(path: String): Result<String, String> do
+  let content = readFile(path)?
+  content
+end
+
+fn readFile(path: String): Result<String, String> do
+  Ok { value: path }
+end`)
+	// Should generate a type switch on the result of readFile
+	assertContains(t, out, "switch __match :=")
+	// Ok arm unwraps the value
+	assertContains(t, out, "ResultOk")
+	// Err arm returns early
+	assertContains(t, out, "ResultErr")
+	assertContains(t, out, "return")
+}
+
+func TestErrorPropagationChainedCodeGen(t *testing.T) {
+	out := generate(t, `pub fn process(path: String): Result<String, String> do
+  let a = readFile(path)?
+  let b = transform(a)?
+  b
+end
+
+fn readFile(path: String): Result<String, String> do
+  Ok { value: path }
+end
+
+fn transform(s: String): Result<String, String> do
+  Ok { value: s }
+end`)
+	// Should have two type switches for the two ? operators
+	switchCount := strings.Count(out, "switch __match :=")
+	if switchCount < 2 {
+		t.Errorf("expected at least 2 type switches for chained ?, got %d", switchCount)
+	}
+}
