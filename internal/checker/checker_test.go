@@ -438,12 +438,12 @@ end`)
 }
 
 func TestSumTypeUnitVariant(t *testing.T) {
-	_, errs := check(`type Option =
-  | Some { value: Int }
-  | None
+	_, errs := check(`type Maybe =
+  | Just { value: Int }
+  | Nothing
 
 fn main() do
-  None
+  Nothing
 end`)
 	expectNoErrors(t, errs)
 }
@@ -717,26 +717,100 @@ end`)
 }
 
 func TestGenericTwoParamSumType(t *testing.T) {
-	_, errs := check(`type Result<T, E> =
-  | Ok { value: T }
-  | Err { error: E }
+	_, errs := check(`type Either<L, R> =
+  | Left { value: L }
+  | Right { value: R }
 
 fn main() do
-  Ok { value: 42 }
+  Left { value: 42 }
 end`)
 	expectNoErrors(t, errs)
 }
 
 func TestGenericMatchTwoParams(t *testing.T) {
-	_, errs := check(`type Result<T, E> =
-  | Ok { value: T }
-  | Err { error: E }
+	_, errs := check(`type Either<L, R> =
+  | Left { value: L }
+  | Right { value: R }
 
-fn unwrap(r: Result<Int, String>): Int do
+fn unwrap(e: Either<Int, String>): Int do
+  match e do
+    | Left { value } -> value
+    | Right { value } -> 0
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+// --- Built-in Result and Option types ---
+
+func TestBuiltinOptionSomeConstruction(t *testing.T) {
+	_, errs := check(`fn main() do
+  Some { value: 42 }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestBuiltinOptionNoneConstruction(t *testing.T) {
+	_, errs := check(`fn main() do
+  None
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestBuiltinOptionPatternMatch(t *testing.T) {
+	_, errs := check(`fn unwrap(o: Option<Int>): Int do
+  match o do
+    | Some { value } -> value
+    | None -> 0
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestBuiltinOptionNonExhaustive(t *testing.T) {
+	_, errs := check(`fn unwrap(o: Option<Int>): Int do
+  match o do
+    | Some { value } -> value
+  end
+end`)
+	if len(errs) == 0 {
+		t.Fatal("expected exhaustiveness error")
+	}
+	expectErrorContains(t, errs, "non-exhaustive")
+}
+
+func TestBuiltinResultOkConstruction(t *testing.T) {
+	_, errs := check(`fn main() do
+  Ok { value: 42 }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestBuiltinResultErrConstruction(t *testing.T) {
+	_, errs := check(`fn main() do
+  Err { error: "something failed" }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestBuiltinResultPatternMatch(t *testing.T) {
+	_, errs := check(`fn unwrap(r: Result<Int, String>): Int do
   match r do
     | Ok { value } -> value
     | Err { error } -> 0
   end
 end`)
 	expectNoErrors(t, errs)
+}
+
+func TestBuiltinResultNonExhaustive(t *testing.T) {
+	_, errs := check(`fn unwrap(r: Result<Int, String>): Int do
+  match r do
+    | Ok { value } -> value
+  end
+end`)
+	if len(errs) == 0 {
+		t.Fatal("expected exhaustiveness error")
+	}
+	expectErrorContains(t, errs, "non-exhaustive")
 }

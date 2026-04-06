@@ -40,6 +40,12 @@ type desugarer struct {
 }
 
 func (d *desugarer) desugarModule(mod *ast.Module) *ast.Module {
+	// Phase 0: Register built-in type variant name mappings.
+	d.nameMap["Ok"] = "ResultOk"
+	d.nameMap["Err"] = "ResultErr"
+	d.nameMap["Some"] = "OptionSome"
+	d.nameMap["None"] = "OptionNone"
+
 	// Phase 1: Build name map from declarations and normalize visibility.
 	for _, decl := range mod.Decls {
 		if fn, ok := decl.(*ast.FnDecl); ok {

@@ -171,31 +171,31 @@ Reference: [type-system.md](../architecture/type-system.md)
 Reference: [error-handling.md](../architecture/error-handling.md)
 
 ### Implementation
-- [ ] `Result<T, E>` as built-in sum type:
+- [x] `Result<T, E>` as built-in sum type:
   ```golem
   type Result<T, E> =
     | Ok { value: T }
     | Err { error: E }
   ```
-- [ ] `Option<T>` as built-in sum type:
+- [x] `Option<T>` as built-in sum type:
   ```golem
   type Option<T> =
     | Some { value: T }
     | None
   ```
-- [ ] Pre-registered in type environment (available without import)
-- [ ] Pattern matchable like any other sum type
-- [ ] Exhaustiveness checking works on Result and Option
+- [x] Pre-registered in type environment (available without import)
+- [x] Pattern matchable like any other sum type
+- [x] Exhaustiveness checking works on Result and Option
 
 ### Code Generation
-- [ ] Sealed interface pattern (same as user-defined sum types)
-- [ ] Built-in type definitions emitted in a generated `golem_builtins.go` or inlined per-file
+- [x] Sealed interface pattern (same as user-defined sum types)
+- [x] Built-in type definitions emitted in a generated `golem_builtins.go` or inlined per-file
 
 ### Tests
-- [ ] Test Result and Option construction
-- [ ] Test pattern matching on Result/Option
-- [ ] Test exhaustiveness checking on Result/Option
-- [ ] Code gen for Result/Option types
+- [x] Test Result and Option construction
+- [x] Test pattern matching on Result/Option
+- [x] Test exhaustiveness checking on Result/Option
+- [x] Code gen for Result/Option types
 
 ---
 

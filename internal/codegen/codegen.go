@@ -23,6 +23,14 @@ const (
 	goAny     = "any"
 )
 
+// Built-in variant Go names (after desugaring).
+const (
+	builtinResultOk   = "ResultOk"
+	builtinResultErr  = "ResultErr"
+	builtinOptionSome = "OptionSome"
+	builtinOptionNone = "OptionNone"
+)
+
 // Generate emits Go source code from a desugared Golem module.
 // The sourceFile parameter is used in the generated header comment.
 // Returns formatted Go source bytes or an error if formatting fails.
@@ -39,6 +47,7 @@ func Generate(mod *ast.Module, sourceFile string) ([]byte, error) {
 
 	// Emit declarations to a separate buffer so we can prepend the header.
 	e.emitDecls(mod.Decls)
+	e.emitBuiltinTypes(mod.Decls)
 	body := e.buf.String()
 
 	// Build the full file with header, package, imports, then body.
@@ -673,6 +682,127 @@ func (e *emitter) typeExpr(te ast.TypeExpr) string {
 		return fmt.Sprintf("%s[%s]", goTypeName(t.Name), strings.Join(args, ", "))
 	default:
 		return goAny
+	}
+}
+
+// emitBuiltinTypes emits Go type definitions for built-in types (Result, Option)
+// only if they are referenced in the module's declarations.
+func (e *emitter) emitBuiltinTypes(decls []ast.Decl) {
+	needsResult, needsOption := scanForBuiltins(decls)
+
+	if needsOption {
+		e.buf.WriteByte('\n')
+		e.emitSumTypeDecl("Option", []string{"T"}, &ast.SumTypeBody{
+			Variants: []*ast.Variant{
+				{Name: "OptionSome", Fields: []*ast.FieldDef{{Name: "value", Type: &ast.NamedType{Name: "T"}}}},
+				{Name: "OptionNone", Fields: nil},
+			},
+		})
+		e.buf.WriteByte('\n')
+	}
+
+	if needsResult {
+		e.buf.WriteByte('\n')
+		e.emitSumTypeDecl("Result", []string{"T", "E"}, &ast.SumTypeBody{
+			Variants: []*ast.Variant{
+				{Name: "ResultOk", Fields: []*ast.FieldDef{{Name: "value", Type: &ast.NamedType{Name: "T"}}}},
+				{Name: "ResultErr", Fields: []*ast.FieldDef{{Name: "error", Type: &ast.NamedType{Name: "E"}}}},
+			},
+		})
+		e.buf.WriteByte('\n')
+	}
+}
+
+// scanForBuiltins checks if Result or Option variant names appear in the declarations.
+func scanForBuiltins(decls []ast.Decl) (needsResult, needsOption bool) {
+	for _, decl := range decls {
+		scanExprForBuiltins(declExprs(decl), &needsResult, &needsOption)
+		if needsResult && needsOption {
+			return
+		}
+	}
+	return
+}
+
+func declExprs(decl ast.Decl) []ast.Expr {
+	switch d := decl.(type) {
+	case *ast.FnDecl:
+		return d.Body
+	case *ast.LetDecl:
+		return []ast.Expr{d.Value}
+	default:
+		return nil
+	}
+}
+
+func scanExprForBuiltins(exprs []ast.Expr, needsResult, needsOption *bool) {
+	for _, expr := range exprs {
+		scanExpr(expr, needsResult, needsOption)
+	}
+}
+
+//nolint:funlen,cyclop // scanning all expression kinds
+func scanExpr(expr ast.Expr, needsResult, needsOption *bool) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *ast.Ident:
+		switch e.Name {
+		case builtinResultOk, builtinResultErr:
+			*needsResult = true
+		case builtinOptionSome, builtinOptionNone:
+			*needsOption = true
+		}
+	case *ast.RecordLit:
+		switch e.Name {
+		case builtinResultOk, builtinResultErr:
+			*needsResult = true
+		case builtinOptionSome, builtinOptionNone:
+			*needsOption = true
+		}
+		for _, f := range e.Fields {
+			scanExpr(f.Value, needsResult, needsOption)
+		}
+	case *ast.BinaryExpr:
+		scanExpr(e.Left, needsResult, needsOption)
+		scanExpr(e.Right, needsResult, needsOption)
+	case *ast.UnaryExpr:
+		scanExpr(e.Operand, needsResult, needsOption)
+	case *ast.CallExpr:
+		scanExpr(e.Func, needsResult, needsOption)
+		scanExprForBuiltins(e.Args, needsResult, needsOption)
+	case *ast.FieldAccessExpr:
+		scanExpr(e.Expr, needsResult, needsOption)
+	case *ast.BlockExpr:
+		scanExprForBuiltins(e.Stmts, needsResult, needsOption)
+	case *ast.IfExpr:
+		scanExpr(e.Cond, needsResult, needsOption)
+		scanExprForBuiltins(e.Then, needsResult, needsOption)
+		scanExprForBuiltins(e.Else, needsResult, needsOption)
+	case *ast.LetExpr:
+		scanExpr(e.Value, needsResult, needsOption)
+	case *ast.ReturnExpr:
+		scanExpr(e.Value, needsResult, needsOption)
+	case *ast.MatchExpr:
+		scanExpr(e.Scrutinee, needsResult, needsOption)
+		for _, arm := range e.Arms {
+			scanPattern(arm.Pattern, needsResult, needsOption)
+			scanExprForBuiltins(arm.Body, needsResult, needsOption)
+		}
+	case *ast.FnLit:
+		scanExprForBuiltins(e.Body, needsResult, needsOption)
+	}
+}
+
+func scanPattern(pat ast.Pattern, needsResult, needsOption *bool) {
+	if cp, ok := pat.(*ast.ConstructorPattern); ok {
+		switch cp.Constructor {
+		case builtinResultOk, builtinResultErr:
+			*needsResult = true
+		case builtinOptionSome, builtinOptionNone:
+			*needsOption = true
+		}
 	}
 }
 

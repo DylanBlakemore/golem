@@ -113,6 +113,9 @@ func (r *Resolver) resolve() {
 	// This allows forward references between functions.
 	r.current = newScope(nil)
 
+	// Register built-in types and their variant constructors.
+	r.registerBuiltinTypes()
+
 	// Register imports first
 	for _, imp := range r.module.Imports {
 		name := importName(imp.Path)
@@ -374,6 +377,22 @@ func (r *Resolver) popScope() {
 
 func (r *Resolver) error(s span.Span, msg string) {
 	r.errors = append(r.errors, Error{Span: s, Message: msg})
+}
+
+// registerBuiltinTypes registers built-in types (Result, Option) and their
+// variant constructors so they are available without user declarations.
+func (r *Resolver) registerBuiltinTypes() {
+	builtinSpan := span.Span{File: "<builtin>"}
+
+	// Result<T, E> = Ok { value: T } | Err { error: E }
+	r.current.define("Result", &DeclRef{Kind: DeclType, Name: "Result", Span: builtinSpan})
+	r.current.define("Ok", &DeclRef{Kind: DeclVariant, Name: "Ok", Span: builtinSpan})
+	r.current.define("Err", &DeclRef{Kind: DeclVariant, Name: "Err", Span: builtinSpan})
+
+	// Option<T> = Some { value: T } | None
+	r.current.define("Option", &DeclRef{Kind: DeclType, Name: "Option", Span: builtinSpan})
+	r.current.define("Some", &DeclRef{Kind: DeclVariant, Name: "Some", Span: builtinSpan})
+	r.current.define("None", &DeclRef{Kind: DeclVariant, Name: "None", Span: builtinSpan})
 }
 
 // importName extracts the package name from an import path.

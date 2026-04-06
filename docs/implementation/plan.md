@@ -41,7 +41,7 @@ Golem is a statically typed, expression-oriented language that transpiles to idi
   - [x] 1.2 — Flat pattern matching
   - [x] 1.3 — Exhaustiveness checking (Maranget algorithm)
   - [x] 1.4 — Generics (mapped to Go 1.18+ generics)
-  - [ ] 1.5 — Result<T, E> and Option<T> built-in types
+  - [x] 1.5 — Result<T, E> and Option<T> built-in types
   - [ ] 1.6 — `?` operator (error propagation)
   - [ ] 1.7 — Go package import with type mapping
   - [ ] 1.8 — Auto-lifting `(T, error)` to `Result<T, Error>`

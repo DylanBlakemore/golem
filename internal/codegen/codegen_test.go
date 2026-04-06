@@ -506,14 +506,14 @@ func TestGenericSumTypeCodegen(t *testing.T) {
 }
 
 func TestGenericTwoParamSumTypeCodegen(t *testing.T) {
-	out := generate(t, `type Result<T, E> =
-  | Ok { value: T }
-  | Err { error: E }`)
-	assertContains(t, out, "type result[T any, E any] interface")
-	assertContains(t, out, "type resultOk[T any, E any] struct")
-	assertContains(t, out, "type resultErr[T any, E any] struct")
-	assertContains(t, out, "func (resultOk[T, E]) isresult()")
-	assertContains(t, out, "func (resultErr[T, E]) isresult()")
+	out := generate(t, `type Either<L, R> =
+  | Left { value: L }
+  | Right { value: R }`)
+	assertContains(t, out, "type either[L any, R any] interface")
+	assertContains(t, out, "type eitherLeft[L any, R any] struct")
+	assertContains(t, out, "type eitherRight[L any, R any] struct")
+	assertContains(t, out, "func (eitherLeft[L, R]) iseither()")
+	assertContains(t, out, "func (eitherRight[L, R]) iseither()")
 }
 
 func TestGenericFunctionCodegen(t *testing.T) {
@@ -539,4 +539,62 @@ fn unbox(b: Box<Int>): Int do
   0
 end`)
 	assertContains(t, out, "func unbox(b box[int]) int")
+}
+
+// --- Built-in Result and Option codegen ---
+
+func TestBuiltinResultCodegen(t *testing.T) {
+	out := generate(t, `fn main() do
+  Ok { value: 42 }
+end`)
+	assertContains(t, out, "type Result[T any, E any] interface")
+	assertContains(t, out, "isResult()")
+	assertContains(t, out, "type ResultOk[T any, E any] struct")
+	assertContains(t, out, "type ResultErr[T any, E any] struct")
+	assertContains(t, out, "func (ResultOk[T, E]) isResult()")
+	assertContains(t, out, "func (ResultErr[T, E]) isResult()")
+}
+
+func TestBuiltinOptionCodegen(t *testing.T) {
+	out := generate(t, `fn main() do
+  Some { value: 42 }
+end`)
+	assertContains(t, out, "type Option[T any] interface")
+	assertContains(t, out, "isOption()")
+	assertContains(t, out, "type OptionSome[T any] struct")
+	assertContains(t, out, "type OptionNone[T any] struct")
+	assertContains(t, out, "func (OptionSome[T]) isOption()")
+	assertContains(t, out, "func (OptionNone[T]) isOption()")
+}
+
+func TestBuiltinResultMatchCodegen(t *testing.T) {
+	out := generate(t, `fn unwrap(r: Result<Int, String>): Int do
+  match r do
+    | Ok { value } -> value
+    | Err { error } -> 0
+  end
+end`)
+	assertContains(t, out, "switch __match := r.(type)")
+	assertContains(t, out, "case ResultOk:")
+	assertContains(t, out, "case ResultErr:")
+}
+
+func TestBuiltinOptionMatchCodegen(t *testing.T) {
+	out := generate(t, `fn unwrap(o: Option<Int>): Int do
+  match o do
+    | Some { value } -> value
+    | None -> 0
+  end
+end`)
+	assertContains(t, out, "switch __match := o.(type)")
+	assertContains(t, out, "case OptionSome:")
+	assertContains(t, out, "case OptionNone:")
+}
+
+func TestBuiltinTypesNotEmittedWhenUnused(t *testing.T) {
+	out := generate(t, `fn main() do
+  42
+end`)
+	assertNotContains(t, out, "type Result")
+	assertNotContains(t, out, "type Option")
 }

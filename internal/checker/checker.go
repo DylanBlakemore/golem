@@ -78,6 +78,9 @@ func Check(mod *ast.Module, res *resolver.Resolution) (*TypeInfo, []Error) {
 }
 
 func (c *Checker) check() {
+	// Phase 0: Register built-in types (Result, Option).
+	c.registerBuiltinTypes()
+
 	// Phase 1: Register all top-level declarations and record types.
 	for _, decl := range c.module.Decls {
 		switch d := decl.(type) {
@@ -150,6 +153,49 @@ func (c *Checker) fnDeclType(fn *ast.FnDecl) *Type {
 	}
 
 	return fnType
+}
+
+// registerBuiltinTypes pre-registers Result<T, E> and Option<T> as built-in
+// sum types so they are available without user declarations.
+func (c *Checker) registerBuiltinTypes() {
+	// Option<T> = Some { value: T } | None
+	{
+		tv := c.freshVar()
+		optionVariants := []*SumVariant{
+			{Name: "Some", Fields: []*RecordField{{Name: "value", Type: tv}}},
+			{Name: "None", Fields: nil},
+		}
+		optionDef := &SumType{Name: "Option", Variants: optionVariants}
+		c.sumDefs["Option"] = optionDef
+		c.typeParamDefs["Option"] = []string{"T"}
+		c.variantToSum["Some"] = "Option"
+		c.variantToSum["None"] = "Option"
+
+		optionType := NewApp(NewSum("Option", optionVariants), []*Type{tv})
+		c.env.define("Option", optionType)
+		c.env.define("Some", optionType)
+		c.env.define("None", optionType)
+	}
+
+	// Result<T, E> = Ok { value: T } | Err { error: E }
+	{
+		tvT := c.freshVar()
+		tvE := c.freshVar()
+		resultVariants := []*SumVariant{
+			{Name: "Ok", Fields: []*RecordField{{Name: "value", Type: tvT}}},
+			{Name: "Err", Fields: []*RecordField{{Name: "error", Type: tvE}}},
+		}
+		resultDef := &SumType{Name: "Result", Variants: resultVariants}
+		c.sumDefs["Result"] = resultDef
+		c.typeParamDefs["Result"] = []string{"T", "E"}
+		c.variantToSum["Ok"] = "Result"
+		c.variantToSum["Err"] = "Result"
+
+		resultType := NewApp(NewSum("Result", resultVariants), []*Type{tvT, tvE})
+		c.env.define("Result", resultType)
+		c.env.define("Ok", resultType)
+		c.env.define("Err", resultType)
+	}
 }
 
 func (c *Checker) registerTypeDecl(td *ast.TypeDecl) {
