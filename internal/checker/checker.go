@@ -41,12 +41,18 @@ type Checker struct {
 
 	// declTypes caches the types of top-level declarations
 	declTypes map[string]*Type
+	// declSchemes caches polymorphic type schemes for top-level declarations
+	declSchemes map[string]*TypeScheme
 	// recordDefs caches record type definitions
 	recordDefs map[string]*RecordType
 	// sumDefs caches sum type definitions
 	sumDefs map[string]*SumType
 	// variantToSum maps variant name -> parent sum type name
 	variantToSum map[string]string
+	// typeParamDefs maps generic type name -> list of type param names
+	typeParamDefs map[string][]string
+	// typeParamEnv maps type param name -> type var during generic type registration
+	typeParamEnv map[string]*Type
 }
 
 // Check performs type checking on the given module with its resolution.
@@ -57,11 +63,14 @@ func Check(mod *ast.Module, res *resolver.Resolution) (*TypeInfo, []Error) {
 		info: &TypeInfo{
 			Types: make(map[string]*Type),
 		},
-		env:          newTypeEnv(nil),
-		declTypes:    make(map[string]*Type),
-		recordDefs:   make(map[string]*RecordType),
-		sumDefs:      make(map[string]*SumType),
-		variantToSum: make(map[string]string),
+		env:           newTypeEnv(nil),
+		declTypes:     make(map[string]*Type),
+		declSchemes:   make(map[string]*TypeScheme),
+		recordDefs:    make(map[string]*RecordType),
+		sumDefs:       make(map[string]*SumType),
+		variantToSum:  make(map[string]string),
+		typeParamDefs: make(map[string][]string),
+		typeParamEnv:  make(map[string]*Type),
 	}
 	c.check()
 	c.info.Warnings = c.warnings
@@ -97,7 +106,19 @@ func (c *Checker) check() {
 }
 
 // fnDeclType builds the function type from a declaration's annotations.
+// For generic functions, it also registers a type scheme.
 func (c *Checker) fnDeclType(fn *ast.FnDecl) *Type {
+	// If generic, create fresh type vars for type parameters
+	var typeParamVars []*Type
+	if len(fn.TypeParams) > 0 {
+		typeParamVars = make([]*Type, len(fn.TypeParams))
+		for i, tp := range fn.TypeParams {
+			tv := c.freshVar()
+			typeParamVars[i] = tv
+			c.typeParamEnv[tp] = tv
+		}
+	}
+
 	params := make([]*Type, len(fn.Params))
 	for i, p := range fn.Params {
 		if p.Type != nil {
@@ -112,10 +133,34 @@ func (c *Checker) fnDeclType(fn *ast.FnDecl) *Type {
 	} else {
 		ret = c.freshVar()
 	}
-	return NewFn(params, ret)
+
+	fnType := NewFn(params, ret)
+
+	// Build type scheme for generic functions
+	if len(fn.TypeParams) > 0 {
+		varIDs := make([]uint64, len(typeParamVars))
+		for i, tv := range typeParamVars {
+			varIDs[i] = tv.Var.ID
+		}
+		c.declSchemes[fn.Name] = &TypeScheme{Vars: varIDs, Type: fnType}
+		// Clean up type param env
+		for _, tp := range fn.TypeParams {
+			delete(c.typeParamEnv, tp)
+		}
+	}
+
+	return fnType
 }
 
 func (c *Checker) registerTypeDecl(td *ast.TypeDecl) {
+	// If generic, create fresh type vars for type parameters
+	if len(td.TypeParams) > 0 {
+		c.typeParamDefs[td.Name] = td.TypeParams
+		for _, tp := range td.TypeParams {
+			c.typeParamEnv[tp] = c.freshVar()
+		}
+	}
+
 	switch body := td.Body.(type) {
 	case *ast.RecordTypeBody:
 		fields := make([]*RecordField, len(body.Fields))
@@ -143,11 +188,30 @@ func (c *Checker) registerTypeDecl(td *ast.TypeDecl) {
 		}
 		sumDef := &SumType{Name: td.Name, Variants: variants}
 		c.sumDefs[td.Name] = sumDef
-		sumType := NewSum(td.Name, variants)
+
+		// For generic sum types, build a KApp type with the type param vars
+		var sumType *Type
+		if len(td.TypeParams) > 0 {
+			args := make([]*Type, len(td.TypeParams))
+			for i, tp := range td.TypeParams {
+				args[i] = c.typeParamEnv[tp]
+			}
+			sumType = NewApp(NewSum(td.Name, variants), args)
+		} else {
+			sumType = NewSum(td.Name, variants)
+		}
+
 		c.env.define(td.Name, sumType)
 		// Register each variant constructor in the env
 		for _, v := range variants {
 			c.env.define(v.Name, sumType)
+		}
+	}
+
+	// Clear type param env after registration
+	if len(td.TypeParams) > 0 {
+		for _, tp := range td.TypeParams {
+			delete(c.typeParamEnv, tp)
 		}
 	}
 }
@@ -252,6 +316,10 @@ func (c *Checker) inferExprKind(expr ast.Expr, env *typeEnv) *Type {
 func (c *Checker) inferIdent(e *ast.Ident, env *typeEnv) *Type {
 	// Check local env first
 	if t := env.lookup(e.Name); t != nil {
+		// Check if there's a scheme for this binding
+		if scheme := env.lookupScheme(e.Name); scheme != nil {
+			return c.instantiate(scheme)
+		}
 		return t
 	}
 	// Check resolver for import refs
@@ -259,6 +327,9 @@ func (c *Checker) inferIdent(e *ast.Ident, env *typeEnv) *Type {
 	if ref != nil {
 		switch ref.Kind { //nolint:exhaustive // only handling relevant cases
 		case resolver.DeclFunction:
+			if scheme, ok := c.declSchemes[ref.Name]; ok {
+				return c.instantiate(scheme)
+			}
 			if t := c.declTypes[ref.Name]; t != nil {
 				return t
 			}
@@ -268,12 +339,80 @@ func (c *Checker) inferIdent(e *ast.Ident, env *typeEnv) *Type {
 			// Unit variant constructor — produces the parent sum type
 			if sumName, ok := c.variantToSum[ref.Name]; ok {
 				sumDef := c.sumDefs[sumName]
-				return NewSum(sumName, sumDef.Variants)
+				sumType := NewSum(sumName, sumDef.Variants)
+				// For generic sum types, instantiate with fresh vars
+				if tps, ok := c.typeParamDefs[sumName]; ok && len(tps) > 0 {
+					args := make([]*Type, len(tps))
+					for i := range tps {
+						args[i] = c.freshVar()
+					}
+					return NewApp(sumType, args)
+				}
+				return sumType
 			}
 		}
 	}
 	c.error(e.Span, fmt.Sprintf("undefined variable %q", e.Name))
 	return TypeError
+}
+
+// instantiate creates a fresh copy of a type scheme by replacing each
+// quantified variable with a fresh type variable.
+func (c *Checker) instantiate(scheme *TypeScheme) *Type {
+	if len(scheme.Vars) == 0 {
+		return scheme.Type
+	}
+	subst := make(map[uint64]*Type, len(scheme.Vars))
+	for _, vid := range scheme.Vars {
+		subst[vid] = c.freshVar()
+	}
+	return c.applySubst(scheme.Type, subst)
+}
+
+// applySubst recursively substitutes type variables in a type.
+func (c *Checker) applySubst(t *Type, subst map[uint64]*Type) *Type {
+	t = Find(t)
+	switch t.Kind {
+	case KVar:
+		if replacement, ok := subst[findRoot(t.Var).ID]; ok {
+			return replacement
+		}
+		return t
+	case KCon:
+		return t
+	case KApp:
+		newCon := c.applySubst(t.App.Con, subst)
+		newArgs := make([]*Type, len(t.App.Args))
+		for i, arg := range t.App.Args {
+			newArgs[i] = c.applySubst(arg, subst)
+		}
+		return NewApp(newCon, newArgs)
+	case KFn:
+		newParams := make([]*Type, len(t.Fn.Params))
+		for i, p := range t.Fn.Params {
+			newParams[i] = c.applySubst(p, subst)
+		}
+		newRet := c.applySubst(t.Fn.Return, subst)
+		return NewFn(newParams, newRet)
+	case KRecord:
+		newFields := make([]*RecordField, len(t.Record.Fields))
+		for i, f := range t.Record.Fields {
+			newFields[i] = &RecordField{Name: f.Name, Type: c.applySubst(f.Type, subst)}
+		}
+		return NewRecord(t.Record.Name, newFields)
+	case KSum:
+		newVariants := make([]*SumVariant, len(t.Sum.Variants))
+		for i, v := range t.Sum.Variants {
+			newFields := make([]*RecordField, len(v.Fields))
+			for j, f := range v.Fields {
+				newFields[j] = &RecordField{Name: f.Name, Type: c.applySubst(f.Type, subst)}
+			}
+			newVariants[i] = &SumVariant{Name: v.Name, Fields: newFields}
+		}
+		return NewSum(t.Sum.Name, newVariants)
+	default:
+		return t
+	}
 }
 
 func (c *Checker) inferBinary(e *ast.BinaryExpr, env *typeEnv) *Type {
@@ -425,12 +564,90 @@ func (c *Checker) inferLet(e *ast.LetExpr, env *typeEnv) *Type {
 	if e.TypeAnno != nil {
 		annoType := c.resolveTypeExpr(e.TypeAnno)
 		c.unify(annoType, valType, e.Span)
-		// Use annotation type for the binding (programmer's intent)
 		bindType = annoType
 	}
+	// Generalize: if the value is a syntactic value (fn literal), generalize its type
+	if c.isSyntacticValue(e.Value) {
+		scheme := c.generalize(bindType, env)
+		if len(scheme.Vars) > 0 {
+			env.define(e.Name, bindType)
+			env.defineScheme(e.Name, scheme)
+			return TypeNil
+		}
+	}
 	env.define(e.Name, bindType)
-	// Let expressions don't produce a value
 	return TypeNil
+}
+
+// isSyntacticValue returns true if the expression is a syntactic value
+// (safe to generalize under the value restriction).
+func (c *Checker) isSyntacticValue(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.FnLit, *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.BoolLit, *ast.NilLit:
+		return true
+	default:
+		return false
+	}
+}
+
+// generalize collects free type variables in t that are not bound in env,
+// and returns a TypeScheme quantifying over them.
+func (c *Checker) generalize(t *Type, env *typeEnv) *TypeScheme {
+	freeVars := c.freeTypeVars(t)
+	envVars := c.envTypeVars(env)
+	var quantified []uint64
+	for vid := range freeVars {
+		if !envVars[vid] {
+			quantified = append(quantified, vid)
+		}
+	}
+	return &TypeScheme{Vars: quantified, Type: t}
+}
+
+// freeTypeVars collects all unresolved type variable IDs in a type.
+func (c *Checker) freeTypeVars(t *Type) map[uint64]bool {
+	vars := make(map[uint64]bool)
+	c.collectFreeVars(t, vars)
+	return vars
+}
+
+func (c *Checker) collectFreeVars(t *Type, vars map[uint64]bool) {
+	t = Find(t)
+	switch t.Kind { //nolint:exhaustive // only collecting from structured types
+	case KVar:
+		vars[findRoot(t.Var).ID] = true
+	case KApp:
+		c.collectFreeVars(t.App.Con, vars)
+		for _, arg := range t.App.Args {
+			c.collectFreeVars(arg, vars)
+		}
+	case KFn:
+		for _, p := range t.Fn.Params {
+			c.collectFreeVars(p, vars)
+		}
+		c.collectFreeVars(t.Fn.Return, vars)
+	case KRecord:
+		for _, f := range t.Record.Fields {
+			c.collectFreeVars(f.Type, vars)
+		}
+	case KSum:
+		for _, v := range t.Sum.Variants {
+			for _, f := range v.Fields {
+				c.collectFreeVars(f.Type, vars)
+			}
+		}
+	}
+}
+
+// envTypeVars collects all type variable IDs referenced in the environment.
+func (c *Checker) envTypeVars(env *typeEnv) map[uint64]bool {
+	vars := make(map[uint64]bool)
+	for e := env; e != nil; e = e.parent {
+		for _, t := range e.symbols {
+			c.collectFreeVars(t, vars)
+		}
+	}
+	return vars
 }
 
 func (c *Checker) inferReturn(e *ast.ReturnExpr, env *typeEnv) *Type {
@@ -493,8 +710,30 @@ func (c *Checker) inferRecordLit(e *ast.RecordLit, env *typeEnv) *Type {
 	return NewRecord(e.Name, recDef.Fields)
 }
 
+//nolint:funlen // generic variant instantiation requires multi-step logic
 func (c *Checker) inferVariantLit(e *ast.RecordLit, sumName string, env *typeEnv) *Type {
 	sumDef := c.sumDefs[sumName]
+
+	// For generic sum types, instantiate with fresh type vars
+	var subst map[uint64]*Type
+	isGeneric := false
+	if tps, ok := c.typeParamDefs[sumName]; ok && len(tps) > 0 {
+		isGeneric = true
+		subst = make(map[uint64]*Type, len(tps))
+		// We need to find the original type vars used during registration.
+		// Re-read the env's type for the sum name and extract args from KApp.
+		if envType := c.env.lookup(sumName); envType != nil {
+			resolved := Find(envType)
+			if resolved.Kind == KApp && len(resolved.App.Args) == len(tps) {
+				for _, arg := range resolved.App.Args {
+					resolved := Find(arg)
+					if resolved.Kind == KVar {
+						subst[findRoot(resolved.Var).ID] = c.freshVar()
+					}
+				}
+			}
+		}
+	}
 
 	// Find the variant definition
 	var variantDef *SumVariant
@@ -505,10 +744,14 @@ func (c *Checker) inferVariantLit(e *ast.RecordLit, sumName string, env *typeEnv
 		}
 	}
 
-	// Build a map of expected field types
+	// Build a map of expected field types (with substitution for generic types)
 	expected := make(map[string]*Type, len(variantDef.Fields))
 	for _, f := range variantDef.Fields {
-		expected[f.Name] = f.Type
+		if isGeneric && len(subst) > 0 {
+			expected[f.Name] = c.applySubst(f.Type, subst)
+		} else {
+			expected[f.Name] = f.Type
+		}
 	}
 
 	// Check provided fields
@@ -530,8 +773,34 @@ func (c *Checker) inferVariantLit(e *ast.RecordLit, sumName string, env *typeEnv
 		}
 	}
 
-	// Variant construction produces the parent sum type
-	return NewSum(sumName, sumDef.Variants)
+	// Variant construction produces the parent sum type (possibly generic)
+	baseSumType := NewSum(sumName, sumDef.Variants)
+	if isGeneric {
+		if tps, ok := c.typeParamDefs[sumName]; ok {
+			args := make([]*Type, len(tps))
+			for i := range tps {
+				// Get the fresh vars we used for substitution
+				found := false
+				if envType := c.env.lookup(sumName); envType != nil {
+					resolved := Find(envType)
+					if resolved.Kind == KApp && i < len(resolved.App.Args) {
+						origVar := Find(resolved.App.Args[i])
+						if origVar.Kind == KVar {
+							if replacement, ok := subst[findRoot(origVar.Var).ID]; ok {
+								args[i] = replacement
+								found = true
+							}
+						}
+					}
+				}
+				if !found {
+					args[i] = c.freshVar()
+				}
+			}
+			return NewApp(baseSumType, args)
+		}
+	}
+	return baseSumType
 }
 
 func (c *Checker) inferMatch(e *ast.MatchExpr, env *typeEnv) *Type {
@@ -554,6 +823,8 @@ func (c *Checker) inferMatch(e *ast.MatchExpr, env *typeEnv) *Type {
 }
 
 // checkPattern type-checks a pattern against the expected type and introduces bindings.
+//
+//nolint:funlen // pattern checking with generic type support is naturally long
 func (c *Checker) checkPattern(pat ast.Pattern, expected *Type, env *typeEnv) {
 	if pat == nil {
 		return
@@ -562,26 +833,60 @@ func (c *Checker) checkPattern(pat ast.Pattern, expected *Type, env *typeEnv) {
 	switch p := pat.(type) {
 	case *ast.ConstructorPattern:
 		resolved := Find(expected)
-		if resolved.Kind != KSum {
+		// Unwrap KApp to get the inner sum type for pattern matching
+		var sumType *SumType
+		switch resolved.Kind { //nolint:exhaustive // only handling sum-like types
+		case KSum:
+			sumType = resolved.Sum
+		case KApp:
+			inner := Find(resolved.App.Con)
+			if inner.Kind == KSum {
+				sumType = inner.Sum
+			}
+		}
+		if sumType == nil {
 			c.error(p.Span, fmt.Sprintf("cannot match constructor pattern against non-sum type %s", resolved))
 			return
 		}
 		// Find the variant
 		var variantDef *SumVariant
-		for _, v := range resolved.Sum.Variants {
+		for _, v := range sumType.Variants {
 			if v.Name == p.Constructor {
 				variantDef = v
 				break
 			}
 		}
 		if variantDef == nil {
-			c.error(p.Span, fmt.Sprintf("unknown variant %q for type %s", p.Constructor, resolved.Sum.Name))
+			c.error(p.Span, fmt.Sprintf("unknown variant %q for type %s", p.Constructor, sumType.Name))
 			return
+		}
+		// For generic types, build substitution from type params to actual args
+		var fieldSubst map[uint64]*Type
+		if resolved.Kind == KApp {
+			if tps, ok := c.typeParamDefs[sumType.Name]; ok && len(tps) == len(resolved.App.Args) {
+				fieldSubst = make(map[uint64]*Type, len(tps))
+				// Get the original type vars from the registered type
+				if envType := c.env.lookup(sumType.Name); envType != nil {
+					envResolved := Find(envType)
+					if envResolved.Kind == KApp && len(envResolved.App.Args) == len(tps) {
+						for i, arg := range envResolved.App.Args {
+							origVar := Find(arg)
+							if origVar.Kind == KVar {
+								fieldSubst[findRoot(origVar.Var).ID] = resolved.App.Args[i]
+							}
+						}
+					}
+				}
+			}
 		}
 		// Bind field patterns
 		fieldTypes := make(map[string]*Type, len(variantDef.Fields))
 		for _, f := range variantDef.Fields {
-			fieldTypes[f.Name] = f.Type
+			ft := f.Type
+			if len(fieldSubst) > 0 {
+				ft = c.applySubst(ft, fieldSubst)
+			}
+			fieldTypes[f.Name] = ft
 		}
 		for _, fp := range p.Fields {
 			ft, ok := fieldTypes[fp.Name]
@@ -641,6 +946,7 @@ func (c *Checker) inferFnLit(e *ast.FnLit, env *typeEnv) *Type {
 
 // --- Unification ---
 
+//nolint:funlen // type-switch unification is naturally long
 func (c *Checker) unify(a, b *Type, s span.Span) {
 	a = Find(a)
 	b = Find(b)
@@ -672,6 +978,15 @@ func (c *Checker) unify(a, b *Type, s span.Span) {
 	case a.Kind == KCon && b.Kind == KCon:
 		if a.Con.Name != b.Con.Name || a.Con.Module != b.Con.Module {
 			c.error(s, fmt.Sprintf("type mismatch: expected %s, got %s", a, b))
+		}
+	case a.Kind == KApp && b.Kind == KApp:
+		c.unify(a.App.Con, b.App.Con, s)
+		if len(a.App.Args) != len(b.App.Args) {
+			c.error(s, fmt.Sprintf("type argument count mismatch: %s vs %s", a, b))
+			return
+		}
+		for i := range a.App.Args {
+			c.unify(a.App.Args[i], b.App.Args[i], s)
 		}
 	case a.Kind == KFn && b.Kind == KFn:
 		if len(a.Fn.Params) != len(b.Fn.Params) {
@@ -723,6 +1038,16 @@ func (c *Checker) occursIn(v *TypeVar, t *Type) bool {
 	switch t.Kind {
 	case KVar:
 		return findRoot(v) == findRoot(t.Var)
+	case KApp:
+		if c.occursIn(v, t.App.Con) {
+			return true
+		}
+		for _, arg := range t.App.Args {
+			if c.occursIn(v, arg) {
+				return true
+			}
+		}
+		return false
 	case KFn:
 		for _, p := range t.Fn.Params {
 			if c.occursIn(v, p) {
@@ -774,14 +1099,23 @@ func (c *Checker) resolveTypeExpr(te ast.TypeExpr) *Type {
 		// Pointer types pass through to codegen; treat as Any for type checking.
 		return TypeAny
 	case *ast.GenericType:
-		// Phase 0: treat generic types as Any
-		return TypeAny
+		con := c.resolveNamedType(t.Name)
+		args := make([]*Type, len(t.TypeArgs))
+		for i, a := range t.TypeArgs {
+			args[i] = c.resolveTypeExpr(a)
+		}
+		return NewApp(con, args)
 	default:
 		return c.freshVar()
 	}
 }
 
 func (c *Checker) resolveNamedType(name string) *Type {
+	// Check if it's a type parameter in scope
+	if tv, ok := c.typeParamEnv[name]; ok {
+		return tv
+	}
+
 	switch name {
 	case "Int":
 		return TypeInt
@@ -834,12 +1168,14 @@ func spanKey(s span.Span) string {
 type typeEnv struct {
 	parent  *typeEnv
 	symbols map[string]*Type
+	schemes map[string]*TypeScheme
 }
 
 func newTypeEnv(parent *typeEnv) *typeEnv {
 	return &typeEnv{
 		parent:  parent,
 		symbols: make(map[string]*Type),
+		schemes: make(map[string]*TypeScheme),
 	}
 }
 
@@ -851,12 +1187,26 @@ func (e *typeEnv) define(name string, t *Type) {
 	e.symbols[name] = t
 }
 
+func (e *typeEnv) defineScheme(name string, scheme *TypeScheme) {
+	e.schemes[name] = scheme
+}
+
 func (e *typeEnv) lookup(name string) *Type {
 	if t, ok := e.symbols[name]; ok {
 		return t
 	}
 	if e.parent != nil {
 		return e.parent.lookup(name)
+	}
+	return nil
+}
+
+func (e *typeEnv) lookupScheme(name string) *TypeScheme {
+	if s, ok := e.schemes[name]; ok {
+		return s
+	}
+	if e.parent != nil {
+		return e.parent.lookupScheme(name)
 	}
 	return nil
 }

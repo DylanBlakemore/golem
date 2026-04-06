@@ -136,33 +136,33 @@ Reference: [pattern-matching.md](../architecture/pattern-matching.md) — Marang
 Reference: [type-system.md](../architecture/type-system.md)
 
 ### Parsing
-- [ ] Type parameter syntax: `type Result<T, E> = ...`
-- [ ] Generic function syntax: `fn map<A, B>(list: List<A>, f: Fn<A, B>): List<B>`
-- [ ] Generic type application: `List<Int>`, `Result<Config, Error>`
+- [x] Type parameter syntax: `type Result<T, E> = ...`
+- [x] Generic function syntax: `fn map<A, B>(list: List<A>, f: Fn<A, B>): List<B>`
+- [x] Generic type application: `List<Int>`, `Result<Config, Error>`
 
 ### Type Checking
-- [ ] `TApp` type kind: `List<Int>` = `TApp(TCon("List"), [TCon("Int")])`
-- [ ] Type parameter introduction in generic declarations
-- [ ] Type argument inference at call sites (never written explicitly by user)
-- [ ] Generalization: `let` bindings and top-level functions get polymorphic type schemes
-- [ ] Instantiation: fresh type variables per use of a polymorphic binding
-- [ ] Value restriction: only syntactic values are generalized
+- [x] `TApp` type kind: `List<Int>` = `TApp(TCon("List"), [TCon("Int")])`
+- [x] Type parameter introduction in generic declarations
+- [x] Type argument inference at call sites (never written explicitly by user)
+- [x] Generalization: `let` bindings and top-level functions get polymorphic type schemes
+- [x] Instantiation: fresh type variables per use of a polymorphic binding
+- [x] Value restriction: only syntactic values are generalized
 
 ### Code Generation
-- [ ] Generic sum types: all variants carry full type parameter set
+- [x] Generic sum types: all variants carry full type parameter set
   ```go
   type ResultOk[T any, E any] struct { Value T }
   type ResultErr[T any, E any] struct { Error E }
   ```
-- [ ] Generic functions: Go type parameters
-- [ ] Emit explicit type arguments at call sites in generated Go
+- [x] Generic functions: Go type parameters
+- [x] Emit explicit type arguments at call sites in generated Go
 
 ### Tests
-- [ ] Test generic type declarations
-- [ ] Test type argument inference at call sites
-- [ ] Test polymorphic let bindings
-- [ ] Test value restriction (side-effecting expressions are monomorphic)
-- [ ] Code gen snapshot tests for generic types and functions
+- [x] Test generic type declarations
+- [x] Test type argument inference at call sites
+- [x] Test polymorphic let bindings
+- [x] Test value restriction (side-effecting expressions are monomorphic)
+- [x] Code gen snapshot tests for generic types and functions
 
 ---
 

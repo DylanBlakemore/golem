@@ -105,8 +105,9 @@ func (d *desugarer) desugarFnDecl(fn *ast.FnDecl) *ast.FnDecl {
 		Span:       fn.Span,
 		Visibility: fn.Visibility,
 		Name:       goName,
+		TypeParams: fn.TypeParams,
 		Params:     newParams,
-		ReturnType: fn.ReturnType,
+		ReturnType: d.desugarTypeExpr(fn.ReturnType),
 		Body:       newBody,
 	}
 }
@@ -160,8 +161,52 @@ func (d *desugarer) desugarLetDecl(ld *ast.LetDecl) *ast.LetDecl {
 
 func (d *desugarer) desugarParams(params []*ast.Param) []*ast.Param {
 	result := make([]*ast.Param, len(params))
-	copy(result, params)
+	for i, p := range params {
+		result[i] = &ast.Param{
+			Span: p.Span,
+			Name: p.Name,
+			Type: d.desugarTypeExpr(p.Type),
+		}
+	}
 	return result
+}
+
+// desugarTypeExpr applies name mapping to type expressions.
+func (d *desugarer) desugarTypeExpr(te ast.TypeExpr) ast.TypeExpr {
+	if te == nil {
+		return nil
+	}
+	switch t := te.(type) {
+	case *ast.NamedType:
+		if goName, ok := d.nameMap[t.Name]; ok {
+			return &ast.NamedType{Span: t.Span, Name: goName}
+		}
+		return t
+	case *ast.GenericType:
+		name := t.Name
+		if goName, ok := d.nameMap[name]; ok {
+			name = goName
+		}
+		args := make([]ast.TypeExpr, len(t.TypeArgs))
+		for i, a := range t.TypeArgs {
+			args[i] = d.desugarTypeExpr(a)
+		}
+		return &ast.GenericType{Span: t.Span, Name: name, TypeArgs: args}
+	case *ast.FnType:
+		params := make([]ast.TypeExpr, len(t.ParamTypes))
+		for i, p := range t.ParamTypes {
+			params[i] = d.desugarTypeExpr(p)
+		}
+		return &ast.FnType{
+			Span:       t.Span,
+			ParamTypes: params,
+			ReturnType: d.desugarTypeExpr(t.ReturnType),
+		}
+	case *ast.PointerType:
+		return &ast.PointerType{Span: t.Span, Elem: d.desugarTypeExpr(t.Elem)}
+	default:
+		return te
+	}
 }
 
 func (d *desugarer) desugarExprs(exprs []ast.Expr) []ast.Expr {

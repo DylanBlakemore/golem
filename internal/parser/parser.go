@@ -221,6 +221,12 @@ func (p *Parser) parseFnDecl(vis ast.Visibility) *ast.FnDecl {
 		return nil
 	}
 
+	// Parse optional type parameters: <A, B>
+	var typeParams []string
+	if p.check(lexer.LT) {
+		typeParams = p.parseTypeParams()
+	}
+
 	if _, ok := p.expect(lexer.LPAREN); !ok {
 		p.synchronize()
 		return nil
@@ -245,6 +251,7 @@ func (p *Parser) parseFnDecl(vis ast.Visibility) *ast.FnDecl {
 		Span:       spanFromTo(start, endSpan),
 		Visibility: vis,
 		Name:       nameTok.Literal,
+		TypeParams: typeParams,
 		Params:     params,
 		ReturnType: retType,
 		Body:       body,
@@ -292,6 +299,30 @@ func (p *Parser) parseParam() *ast.Param {
 	}
 }
 
+// parseTypeParams parses a type parameter list: <T, E>
+// Expects the current token to be LT. Consumes through GT.
+func (p *Parser) parseTypeParams() []string {
+	p.advance() // consume <
+
+	var params []string
+	if !p.check(lexer.GT) {
+		tok, ok := p.expect(lexer.UPPER_IDENT)
+		if ok {
+			params = append(params, tok.Literal)
+		}
+		for p.check(lexer.COMMA) {
+			p.advance()
+			tok, ok = p.expect(lexer.UPPER_IDENT)
+			if ok {
+				params = append(params, tok.Literal)
+			}
+		}
+	}
+
+	p.expect(lexer.GT)
+	return params
+}
+
 func (p *Parser) parseTypeDecl(vis ast.Visibility) *ast.TypeDecl {
 	start := p.peek().Span
 	p.advance() // consume TYPE
@@ -300,6 +331,12 @@ func (p *Parser) parseTypeDecl(vis ast.Visibility) *ast.TypeDecl {
 	if !ok {
 		p.synchronize()
 		return nil
+	}
+
+	// Parse optional type parameters: <T, E>
+	var typeParams []string
+	if p.check(lexer.LT) {
+		typeParams = p.parseTypeParams()
 	}
 
 	if _, ok := p.expect(lexer.ASSIGN); !ok {
@@ -328,6 +365,7 @@ func (p *Parser) parseTypeDecl(vis ast.Visibility) *ast.TypeDecl {
 		Span:       spanFromTo(start, endSpan),
 		Visibility: vis,
 		Name:       nameTok.Literal,
+		TypeParams: typeParams,
 		Body:       body,
 	}
 }

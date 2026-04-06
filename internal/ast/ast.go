@@ -34,6 +34,7 @@ type FnDecl struct {
 	Span       span.Span
 	Visibility Visibility
 	Name       string
+	TypeParams []string // generic type parameters, e.g. <A, B>
 	Params     []*Param
 	ReturnType TypeExpr // nil if omitted
 	Body       []Expr

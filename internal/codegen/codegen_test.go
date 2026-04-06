@@ -490,3 +490,53 @@ end`)
 	assertContains(t, out, "case 1:")
 	assertContains(t, out, "default:")
 }
+
+// --- Generic type code generation ---
+
+func TestGenericSumTypeCodegen(t *testing.T) {
+	out := generate(t, `type Box<T> =
+  | Full { value: T }
+  | Empty`)
+	assertContains(t, out, "type box[T any] interface")
+	assertContains(t, out, "isbox()")
+	assertContains(t, out, "type boxFull[T any] struct")
+	assertContains(t, out, "type boxEmpty[T any] struct")
+	assertContains(t, out, "func (boxFull[T]) isbox()")
+	assertContains(t, out, "func (boxEmpty[T]) isbox()")
+}
+
+func TestGenericTwoParamSumTypeCodegen(t *testing.T) {
+	out := generate(t, `type Result<T, E> =
+  | Ok { value: T }
+  | Err { error: E }`)
+	assertContains(t, out, "type result[T any, E any] interface")
+	assertContains(t, out, "type resultOk[T any, E any] struct")
+	assertContains(t, out, "type resultErr[T any, E any] struct")
+	assertContains(t, out, "func (resultOk[T, E]) isresult()")
+	assertContains(t, out, "func (resultErr[T, E]) isresult()")
+}
+
+func TestGenericFunctionCodegen(t *testing.T) {
+	out := generate(t, `fn identity<A>(x: A): A do
+  x
+end`)
+	assertContains(t, out, "func identity[A any](x A) A")
+}
+
+func TestGenericFunctionMultiParamCodegen(t *testing.T) {
+	out := generate(t, `fn first<A, B>(a: A, b: B): A do
+  a
+end`)
+	assertContains(t, out, "func first[A any, B any](a A, b B) A")
+}
+
+func TestGenericTypeApplicationInAnnotation(t *testing.T) {
+	out := generate(t, `type Box<T> =
+  | Full { value: T }
+  | Empty
+
+fn unbox(b: Box<Int>): Int do
+  0
+end`)
+	assertContains(t, out, "func unbox(b box[int]) int")
+}

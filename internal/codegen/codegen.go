@@ -104,15 +104,17 @@ func (e *emitter) emitTypeDecl(td *ast.TypeDecl) {
 		e.indent--
 		e.linef("}")
 	case *ast.SumTypeBody:
-		e.emitSumTypeDecl(td.Name, body)
+		e.emitSumTypeDecl(td.Name, td.TypeParams, body)
 	}
 }
 
-func (e *emitter) emitSumTypeDecl(name string, body *ast.SumTypeBody) {
+func (e *emitter) emitSumTypeDecl(name string, typeParams []string, body *ast.SumTypeBody) {
 	marker := "is" + name
+	typeParamDecl := goTypeParamDecl(typeParams)
+	typeParamUse := goTypeParamUse(typeParams)
 
 	// Emit the sealed interface
-	e.linef("type %s interface {", name)
+	e.linef("type %s%s interface {", name, typeParamDecl)
 	e.indent++
 	e.linef("%s()", marker)
 	e.indent--
@@ -121,7 +123,7 @@ func (e *emitter) emitSumTypeDecl(name string, body *ast.SumTypeBody) {
 	// Emit each variant struct (names already prefixed by desugarer)
 	for _, v := range body.Variants {
 		e.buf.WriteByte('\n')
-		e.linef("type %s struct {", v.Name)
+		e.linef("type %s%s struct {", v.Name, typeParamDecl)
 		e.indent++
 		for _, f := range v.Fields {
 			e.linef("%s %s", exportField(f.Name), e.typeExpr(f.Type))
@@ -129,7 +131,7 @@ func (e *emitter) emitSumTypeDecl(name string, body *ast.SumTypeBody) {
 		e.indent--
 		e.linef("}")
 		e.buf.WriteByte('\n')
-		e.linef("func (%s) %s() {}", v.Name, marker)
+		e.linef("func (%s%s) %s() {}", v.Name, typeParamUse, marker)
 	}
 }
 
@@ -139,8 +141,9 @@ func (e *emitter) emitFnDecl(fn *ast.FnDecl) {
 	if fn.ReturnType != nil {
 		ret = " " + e.typeExpr(fn.ReturnType)
 	}
+	typeParamDecl := goTypeParamDecl(fn.TypeParams)
 
-	e.linef("func %s(%s)%s {", fn.Name, params, ret)
+	e.linef("func %s%s(%s)%s {", fn.Name, typeParamDecl, params, ret)
 	e.indent++
 	e.emitBody(fn.Body)
 	e.indent--
@@ -663,10 +666,36 @@ func (e *emitter) typeExpr(te ast.TypeExpr) string {
 		}
 		return fmt.Sprintf("func(%s)%s", strings.Join(params, ", "), ret)
 	case *ast.GenericType:
-		return t.Name
+		args := make([]string, len(t.TypeArgs))
+		for i, a := range t.TypeArgs {
+			args[i] = e.typeExpr(a)
+		}
+		return fmt.Sprintf("%s[%s]", goTypeName(t.Name), strings.Join(args, ", "))
 	default:
 		return goAny
 	}
+}
+
+// goTypeParamDecl builds a Go type parameter declaration string, e.g. "[T any, E any]".
+// Returns "" if there are no type params.
+func goTypeParamDecl(typeParams []string) string {
+	if len(typeParams) == 0 {
+		return ""
+	}
+	parts := make([]string, len(typeParams))
+	for i, tp := range typeParams {
+		parts[i] = tp + " any"
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// goTypeParamUse builds a Go type parameter usage string, e.g. "[T, E]".
+// Returns "" if there are no type params.
+func goTypeParamUse(typeParams []string) string {
+	if len(typeParams) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(typeParams, ", ") + "]"
 }
 
 // goTypeName maps Golem built-in type names to Go type names.

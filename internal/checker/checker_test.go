@@ -616,3 +616,127 @@ fn show(c: Color): String do
 end`)
 	expectNoErrors(t, errs)
 }
+
+// --- Generics ---
+
+func TestGenericSumTypeDecl(t *testing.T) {
+	_, errs := check(`type Box<T> =
+  | Full { value: T }
+  | Empty
+
+fn main() do
+  Full { value: 42 }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGenericSumTypeFieldInference(t *testing.T) {
+	_, errs := check(`type Box<T> =
+  | Full { value: T }
+  | Empty
+
+fn main(): Int do
+  let b = Full { value: 42 }
+  match b do
+    | Full { value } -> value
+    | Empty -> 0
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGenericFunction(t *testing.T) {
+	_, errs := check(`fn identity<A>(x: A): A do
+  x
+end
+
+fn main(): Int do
+  identity(42)
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGenericFunctionTypeInference(t *testing.T) {
+	_, errs := check(`fn identity<A>(x: A): A do
+  x
+end
+
+fn main(): String do
+  identity("hello")
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGenericFunctionMultipleTypeParams(t *testing.T) {
+	_, errs := check(`fn first<A, B>(a: A, b: B): A do
+  a
+end
+
+fn main(): Int do
+  first(42, "hello")
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGenericSumTypeExhaustive(t *testing.T) {
+	_, errs := check(`type Box<T> =
+  | Full { value: T }
+  | Empty
+
+fn unbox(b: Box<Int>): Int do
+  match b do
+    | Full { value } -> value
+    | Empty -> 0
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGenericSumTypeNonExhaustive(t *testing.T) {
+	_, errs := check(`type Box<T> =
+  | Full { value: T }
+  | Empty
+
+fn unbox(b: Box<Int>): Int do
+  match b do
+    | Full { value } -> value
+  end
+end`)
+	if len(errs) == 0 {
+		t.Fatal("expected exhaustiveness error")
+	}
+	expectErrorContains(t, errs, "non-exhaustive")
+}
+
+func TestPolymorphicLetBinding(t *testing.T) {
+	_, errs := check(`fn main() do
+  let id = fn(x: Int): Int do x end
+  id(42)
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGenericTwoParamSumType(t *testing.T) {
+	_, errs := check(`type Result<T, E> =
+  | Ok { value: T }
+  | Err { error: E }
+
+fn main() do
+  Ok { value: 42 }
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGenericMatchTwoParams(t *testing.T) {
+	_, errs := check(`type Result<T, E> =
+  | Ok { value: T }
+  | Err { error: E }
+
+fn unwrap(r: Result<Int, String>): Int do
+  match r do
+    | Ok { value } -> value
+    | Err { error } -> 0
+  end
+end`)
+	expectNoErrors(t, errs)
+}

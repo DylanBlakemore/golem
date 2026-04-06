@@ -1260,3 +1260,82 @@ end`
 		t.Error("expected true")
 	}
 }
+
+// --- Generic type parameters ---
+
+func TestParseGenericTypeDecl(t *testing.T) {
+	mod, errs := parse(`type Result<T, E> =
+  | Ok { value: T }
+  | Err { error: E }`)
+	expectNoErrors(t, errs)
+
+	if len(mod.Decls) != 1 {
+		t.Fatalf("expected 1 decl, got %d", len(mod.Decls))
+	}
+	td, ok := mod.Decls[0].(*ast.TypeDecl)
+	if !ok {
+		t.Fatalf("expected TypeDecl, got %T", mod.Decls[0])
+	}
+	if td.Name != "Result" {
+		t.Errorf("expected name Result, got %s", td.Name)
+	}
+	if len(td.TypeParams) != 2 {
+		t.Fatalf("expected 2 type params, got %d", len(td.TypeParams))
+	}
+	if td.TypeParams[0] != "T" || td.TypeParams[1] != "E" {
+		t.Errorf("expected type params [T, E], got %v", td.TypeParams)
+	}
+	body, ok := td.Body.(*ast.SumTypeBody)
+	if !ok {
+		t.Fatalf("expected SumTypeBody, got %T", td.Body)
+	}
+	if len(body.Variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(body.Variants))
+	}
+}
+
+func TestParseGenericFnDecl(t *testing.T) {
+	mod, errs := parse(`fn identity<A>(x: A): A do
+  x
+end`)
+	expectNoErrors(t, errs)
+
+	if len(mod.Decls) != 1 {
+		t.Fatalf("expected 1 decl, got %d", len(mod.Decls))
+	}
+	fn, ok := mod.Decls[0].(*ast.FnDecl)
+	if !ok {
+		t.Fatalf("expected FnDecl, got %T", mod.Decls[0])
+	}
+	if fn.Name != "identity" {
+		t.Errorf("expected name identity, got %s", fn.Name)
+	}
+	if len(fn.TypeParams) != 1 {
+		t.Fatalf("expected 1 type param, got %d", len(fn.TypeParams))
+	}
+	if fn.TypeParams[0] != "A" {
+		t.Errorf("expected type param A, got %s", fn.TypeParams[0])
+	}
+}
+
+func TestParseGenericTypeApplication(t *testing.T) {
+	mod, errs := parse(`fn wrap(x: Int): Result<Int, String> do
+  x
+end`)
+	expectNoErrors(t, errs)
+
+	fn, ok := mod.Decls[0].(*ast.FnDecl)
+	if !ok {
+		t.Fatalf("expected FnDecl, got %T", mod.Decls[0])
+	}
+	retType, ok := fn.ReturnType.(*ast.GenericType)
+	if !ok {
+		t.Fatalf("expected GenericType return, got %T", fn.ReturnType)
+	}
+	if retType.Name != "Result" {
+		t.Errorf("expected Result, got %s", retType.Name)
+	}
+	if len(retType.TypeArgs) != 2 {
+		t.Fatalf("expected 2 type args, got %d", len(retType.TypeArgs))
+	}
+}

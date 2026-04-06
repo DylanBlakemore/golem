@@ -33,6 +33,13 @@ func (c *Checker) checkMatchExhaustive(e *ast.MatchExpr, scrutineeType *Type) {
 	if resolved.Kind == KError || resolved.Kind == KVar {
 		return
 	}
+	// Unwrap KApp for exhaustiveness checking — use the inner sum type
+	if resolved.Kind == KApp {
+		inner := Find(resolved.App.Con)
+		if inner.Kind == KSum || inner.Kind == KCon {
+			resolved = inner
+		}
+	}
 
 	matrix := make([][]ast.Pattern, len(e.Arms))
 	for i, arm := range e.Arms {
@@ -57,6 +64,10 @@ func (c *Checker) checkMatchExhaustive(e *ast.MatchExpr, scrutineeType *Type) {
 // Returns nil for infinite types (Int, Float, String).
 func (c *Checker) typeConstructors(t *Type) []constructor {
 	t = Find(t)
+	// Unwrap KApp to get inner type
+	if t.Kind == KApp {
+		t = Find(t.App.Con)
+	}
 	switch t.Kind {
 	case KSum:
 		ctors := make([]constructor, len(t.Sum.Variants))

@@ -12,6 +12,7 @@ type TypeKind int
 const (
 	KVar    TypeKind = iota // Unresolved type variable
 	KCon                    // Concrete type constructor (Int, String, etc.)
+	KApp                    // Type application: List<Int> = App(Con("List"), [Con("Int")])
 	KFn                     // Function type (params -> return)
 	KRecord                 // Record/struct type { field: Type, ... }
 	KSum                    // Sum type (algebraic data type)
@@ -22,6 +23,7 @@ const (
 type Type struct {
 	Kind   TypeKind
 	Con    *ConType    // non-nil when Kind == KCon
+	App    *AppType    // non-nil when Kind == KApp
 	Fn     *FnType     // non-nil when Kind == KFn
 	Record *RecordType // non-nil when Kind == KRecord
 	Sum    *SumType    // non-nil when Kind == KSum
@@ -32,6 +34,12 @@ type Type struct {
 type ConType struct {
 	Name   string // "Int", "String", "Bool", "Float", "Nil", "Any"
 	Module string // "" for builtins, package path for Go types
+}
+
+// AppType represents a type application, e.g. List<Int> or Result<T, E>.
+type AppType struct {
+	Con  *Type   // the type constructor being applied (e.g. Con("Result"))
+	Args []*Type // type arguments
 }
 
 // FnType represents a function type.
@@ -72,7 +80,16 @@ type TypeVar struct {
 	Link   *Type // the resolved type, if this variable has been unified
 }
 
+// TypeScheme represents a polymorphic type (forall quantification).
+// Vars are the IDs of the quantified type variables.
+type TypeScheme struct {
+	Vars []uint64
+	Type *Type
+}
+
 // String returns a human-readable representation of the type.
+//
+//nolint:funlen // type-switch over all type kinds is naturally long
 func (t *Type) String() string {
 	if t == nil {
 		return "<nil>"
@@ -89,6 +106,18 @@ func (t *Type) String() string {
 			return t.Con.Module + "." + t.Con.Name
 		}
 		return t.Con.Name
+	case KApp:
+		var b strings.Builder
+		b.WriteString(t.App.Con.String())
+		b.WriteByte('<')
+		for i, arg := range t.App.Args {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(arg.String())
+		}
+		b.WriteByte('>')
+		return b.String()
 	case KFn:
 		var b strings.Builder
 		for i, p := range t.Fn.Params {
@@ -143,6 +172,11 @@ func NewCon(name string) *Type {
 // NewQualifiedCon creates a concrete type with a module qualifier.
 func NewQualifiedCon(module, name string) *Type {
 	return &Type{Kind: KCon, Con: &ConType{Name: name, Module: module}}
+}
+
+// NewApp creates a type application, e.g. List<Int>.
+func NewApp(con *Type, args []*Type) *Type {
+	return &Type{Kind: KApp, App: &AppType{Con: con, Args: args}}
 }
 
 // NewFn creates a function type.
