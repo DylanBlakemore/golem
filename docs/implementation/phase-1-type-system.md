@@ -300,28 +300,28 @@ Reference: [go-interop.md](../architecture/go-interop.md)
 Reference: [go-interop.md](../architecture/go-interop.md), [error-handling.md](../architecture/error-handling.md)
 
 ### Type Mapper Extension
-- [ ] Detect Go functions returning `(T, error)` pattern
-- [ ] Map return type to `Result<T, Error>` in Golem type system
-- [ ] Functions returning only `error` -> `Result<Unit, Error>`
+- [x] Detect Go functions returning `(T, error)` pattern
+- [x] Map return type to `Result<T, Error>` in Golem type system
+- [x] Functions returning only `error` -> `Result<Unit, Error>`
 
 ### Code Generation
-- [ ] At Go call sites, generate error-checking wrapper:
+- [x] At Go call sites, generate error-checking IIFE wrapper:
   ```go
-  rawResult, rawErr := os.ReadFile(path)
-  var golemResult Result[[]byte, error]
-  if rawErr != nil {
-      golemResult = ResultErr[[]byte, error]{Error: rawErr}
-  } else {
-      golemResult = ResultOk[[]byte, error]{Value: rawResult}
-  }
+  func() Result[[]byte, error] {
+      __v, __e := os.ReadFile(path)
+      if __e != nil { return ResultErr[[]byte, error]{Error: __e} }
+      return ResultOk[[]byte, error]{Value: __v}
+  }()
   ```
-- [ ] Combined with `?` operator for ergonomic usage
+- [x] Combined with `?` operator for ergonomic usage
+- [x] Type switch case labels use concrete type params for lifted vars
+- [x] ResultOk/ResultErr composite literals include type params in Result-returning functions
 
 ### Tests
-- [ ] Test `(T, error)` detection in Go function signatures
-- [ ] Test auto-lifting for Go stdlib functions (`os.ReadFile`, `os.Open`, etc.)
-- [ ] Test `error`-only return mapping
-- [ ] End-to-end: Golem calls Go function with `?` and handles errors
+- [x] Test `(T, error)` detection in Go function signatures
+- [x] Test auto-lifting for Go stdlib functions (`os.ReadFile`, `os.Open`, etc.)
+- [x] Test `error`-only return mapping
+- [x] End-to-end: Golem calls Go function with `?` and handles errors (compiled Go output verified)
 
 ---
 

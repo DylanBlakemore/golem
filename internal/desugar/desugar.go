@@ -296,6 +296,10 @@ func (d *desugarer) hoistErrorPropExpr(e *ast.ErrorPropagationExpr) ([]ast.Expr,
 	tmpName := d.freshTmpName()
 	// Temp variable to hold the unwrapped Ok value.
 	valName := d.freshTmpName()
+	// Temp variable to hold the error value.
+	// We avoid the name "error" because it shadows Go's predeclared error type,
+	// which causes compilation failures when used as a generic type argument.
+	errName := d.freshTmpName()
 
 	// let tmpName = innerExpr
 	letTmp := &ast.LetExpr{Span: e.Span, Name: tmpName, Value: innerExpr}
@@ -303,7 +307,7 @@ func (d *desugarer) hoistErrorPropExpr(e *ast.ErrorPropagationExpr) ([]ast.Expr,
 	// Build the match expression:
 	//   match tmpName do
 	//     | Ok { value } -> value
-	//     | Err { error } -> return Err { error: error }
+	//     | Err { error: errName } -> return Err { error: errName }
 	//   end
 	matchExpr := &ast.MatchExpr{
 		Span:      e.Span,
@@ -323,7 +327,12 @@ func (d *desugarer) hoistErrorPropExpr(e *ast.ErrorPropagationExpr) ([]ast.Expr,
 				Pattern: &ast.ConstructorPattern{
 					Span:        e.Span,
 					Constructor: "Err",
-					Fields:      []*ast.FieldPattern{{Span: e.Span, Name: "error"}},
+					// Use errName as the binding variable; OrigField names the struct field.
+					Fields: []*ast.FieldPattern{{
+						Span:      e.Span,
+						Name:      errName,
+						OrigField: "error",
+					}},
 				},
 				Body: []ast.Expr{
 					&ast.ReturnExpr{
@@ -334,7 +343,7 @@ func (d *desugarer) hoistErrorPropExpr(e *ast.ErrorPropagationExpr) ([]ast.Expr,
 							Fields: []*ast.FieldInit{{
 								Span:  e.Span,
 								Name:  "error",
-								Value: &ast.Ident{Span: e.Span, Name: "error"},
+								Value: &ast.Ident{Span: e.Span, Name: errName},
 							}},
 						},
 					},
@@ -497,9 +506,10 @@ func (d *desugarer) desugarPattern(pat ast.Pattern) ast.Pattern {
 		fields := make([]*ast.FieldPattern, len(p.Fields))
 		for i, fp := range p.Fields {
 			fields[i] = &ast.FieldPattern{
-				Span:    fp.Span,
-				Name:    fp.Name,
-				Pattern: d.desugarPattern(fp.Pattern),
+				Span:      fp.Span,
+				Name:      fp.Name,
+				OrigField: fp.OrigField,
+				Pattern:   d.desugarPattern(fp.Pattern),
 			}
 		}
 		return &ast.ConstructorPattern{

@@ -6,6 +6,8 @@ import (
 
 	"github.com/dylanblakemore/golem/internal/ast"
 	"github.com/dylanblakemore/golem/internal/desugar"
+	"github.com/dylanblakemore/golem/internal/golifter"
+	"github.com/dylanblakemore/golem/internal/goloader"
 	"github.com/dylanblakemore/golem/internal/lexer"
 	"github.com/dylanblakemore/golem/internal/parser"
 	"github.com/dylanblakemore/golem/internal/resolver"
@@ -26,6 +28,30 @@ func generate(t *testing.T, source string) string {
 		t.Fatalf("resolver errors: %v", rerrs)
 	}
 	result := desugar.Desugar(mod)
+	out, err := Generate(result.Module, "test.golem")
+	if err != nil {
+		t.Fatalf("codegen error: %v", err)
+	}
+	return string(out)
+}
+
+// generateWithLoader runs the full pipeline including golifter with a real Go package loader.
+func generateWithLoader(t *testing.T, source string) string {
+	t.Helper()
+	l := lexer.New(source, "test.golem")
+	tokens := l.Tokenize()
+	p := parser.New(tokens, "test.golem")
+	mod, perrs := p.Parse()
+	if len(perrs) > 0 {
+		t.Fatalf("parse errors: %v", perrs)
+	}
+	res, rerrs := resolver.Resolve(mod)
+	if len(rerrs) > 0 {
+		t.Fatalf("resolver errors: %v", rerrs)
+	}
+	loader := goloader.New()
+	lifted := golifter.Lift(mod, res, loader)
+	result := desugar.Desugar(lifted)
 	out, err := Generate(result.Module, "test.golem")
 	if err != nil {
 		t.Fatalf("codegen error: %v", err)
@@ -638,4 +664,68 @@ end`)
 	if switchCount < 2 {
 		t.Errorf("expected at least 2 type switches for chained ?, got %d", switchCount)
 	}
+}
+
+// --- GoLiftCallExpr code generation (auto-lifting (T, error) → Result) ---
+
+func TestGoLiftCallExprEmitsIIFE(t *testing.T) {
+	// Direct GoLiftCallExpr in a let statement.
+	out := generateWithLoader(t, `import "os"
+
+pub fn readBytes(path: String): String do
+  os.readFile(path)
+  path
+end`)
+	// The IIFE should wrap os.ReadFile and produce a Result.
+	assertContains(t, out, "func() Result[")
+	assertContains(t, out, "ResultOk[")
+	assertContains(t, out, "ResultErr[")
+	assertContains(t, out, "os.ReadFile(")
+}
+
+func TestGoLiftCallExprErrorOnlyIIFE(t *testing.T) {
+	// net/http.ListenAndServe returns only error → Result[struct{}, error].
+	out := generateWithLoader(t, `import "net/http"
+
+pub fn serve(): String do
+  http.listenAndServe(":8080", nil)
+  "done"
+end`)
+	assertContains(t, out, "func() Result[struct{}, error]")
+	assertContains(t, out, "ResultOk[struct{}, error]")
+	assertContains(t, out, "ResultErr[struct{}, error]")
+}
+
+func TestGoLiftWithQuestionOperator(t *testing.T) {
+	// ? on a lifted Go call: the type switch should have typed case labels.
+	out := generateWithLoader(t, `import "os"
+
+pub fn readContent(path: String): Result<List<Int>, Error> do
+  let bytes = os.readFile(path)?
+  Ok { value: 0 }
+end`)
+	// The IIFE wrapper should be present.
+	assertContains(t, out, "func() Result[[]byte, error]")
+	// Type switch cases should include generic type args.
+	assertContains(t, out, "case ResultOk[[]byte, error]:")
+	assertContains(t, out, "case ResultErr[[]byte, error]:")
+}
+
+func TestGoTypeNameErrorMapping(t *testing.T) {
+	// Golem "Error" type name should generate lowercase Go "error".
+	out := generate(t, `fn process(r: Result<Int, Error>): Int do
+  match r do
+    | Ok { value } -> value
+    | Err { error } -> 0
+  end
+end`)
+	assertContains(t, out, "Result[int, error]")
+}
+
+func TestResultCompositeWithTypeParams(t *testing.T) {
+	// ResultOk/ResultErr literals in a function returning Result<T, E> should include type params.
+	out := generate(t, `pub fn double(x: Int): Result<Int, Error> do
+  Ok { value: x }
+end`)
+	assertContains(t, out, "ResultOk[int, error]")
 }

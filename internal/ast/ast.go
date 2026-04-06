@@ -446,9 +446,10 @@ func (p *ConstructorPattern) GetSpan() span.Span { return p.Span }
 
 // FieldPattern represents a field binding in a constructor pattern.
 type FieldPattern struct {
-	Span    span.Span
-	Name    string
-	Pattern Pattern // nil means bind to same-name variable
+	Span      span.Span
+	Name      string  // variable name to bind
+	OrigField string  // struct field to access; empty means same as Name
+	Pattern   Pattern // nil means bind to same-name variable
 }
 
 // VarPattern matches anything and binds to a variable.
@@ -486,6 +487,20 @@ type ErrorPropagationExpr struct {
 
 func (*ErrorPropagationExpr) exprNode()            {}
 func (e *ErrorPropagationExpr) GetSpan() span.Span { return e.Span }
+
+// GoLiftCallExpr wraps a call to a Go function returning (T, error) or error,
+// converting the multi-value Go return into a Golem Result value.
+// This node is inserted by the golifter pass after type checking.
+// ValueGoType holds the Go type string for the success value (e.g. "[]byte"),
+// or is empty when the Go function returns only error (→ Result[struct{}, error]).
+type GoLiftCallExpr struct {
+	Span        span.Span
+	Call        Expr
+	ValueGoType string // "" means error-only return
+}
+
+func (*GoLiftCallExpr) exprNode()            {}
+func (e *GoLiftCallExpr) GetSpan() span.Span { return e.Span }
 
 // BadExpr represents a parse error placeholder.
 type BadExpr struct {

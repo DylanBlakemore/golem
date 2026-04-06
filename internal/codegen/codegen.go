@@ -76,6 +76,13 @@ type emitter struct {
 	indent  int
 	imports map[string]bool
 	source  string
+
+	// liftedVars tracks variables bound from GoLiftCallExpr values.
+	// Maps variable name → Go value type string (e.g. "[]byte"), or "" for error-only.
+	liftedVars map[string]string
+	// resultTypeParams is set when the current function returns Result[T, E].
+	// It holds the joined type args string, e.g. "string, error".
+	resultTypeParams string
 }
 
 func (e *emitter) linef(format string, args ...any) {
@@ -152,12 +159,38 @@ func (e *emitter) emitFnDecl(fn *ast.FnDecl) {
 	}
 	typeParamDecl := goTypeParamDecl(fn.TypeParams)
 
+	// Track Result type params for the duration of this function so that
+	// ResultOk/ResultErr composite literals and return statements can include them.
+	prevResultTypeParams := e.resultTypeParams
+	prevLiftedVars := e.liftedVars
+	e.resultTypeParams = extractResultTypeParams(fn.ReturnType, e)
+	e.liftedVars = make(map[string]string)
+
 	e.linef("func %s%s(%s)%s {", fn.Name, typeParamDecl, params, ret)
 	e.indent++
 	e.emitBody(fn.Body)
 	e.indent--
 	e.linef("}")
+
+	e.resultTypeParams = prevResultTypeParams
+	e.liftedVars = prevLiftedVars
 }
+
+// extractResultTypeParams returns the comma-joined Go type argument string for a
+// function whose return type is Result<T, E>, or "" for any other return type.
+func extractResultTypeParams(retType ast.TypeExpr, e *emitter) string {
+	gt, ok := retType.(*ast.GenericType)
+	if !ok {
+		return ""
+	}
+	if gt.Name != "Result" || len(gt.TypeArgs) != resultTypeArgCount {
+		return ""
+	}
+	return e.typeExpr(gt.TypeArgs[0]) + ", " + e.typeExpr(gt.TypeArgs[1])
+}
+
+// resultTypeArgCount is the expected number of type args for Result<T, E>.
+const resultTypeArgCount = 2
 
 func (e *emitter) emitTopLetDecl(ld *ast.LetDecl) {
 	e.linef("var %s = %s", ld.Name, e.exprString(ld.Value))
@@ -209,6 +242,18 @@ func (e *emitter) emitLetStmt(le *ast.LetExpr) {
 	// If the value is a MatchExpr, use the result variable pattern.
 	if matchExpr, ok := le.Value.(*ast.MatchExpr); ok {
 		e.emitMatchAssign(le.Name, matchExpr)
+		return
+	}
+	// Track variables bound from GoLiftCallExpr so type switch cases can use
+	// the correct generic type arguments.
+	if lift, ok := le.Value.(*ast.GoLiftCallExpr); ok {
+		if e.liftedVars != nil {
+			e.liftedVars[le.Name] = lift.ValueGoType
+		}
+	}
+	if le.Name == "_" {
+		// Blank identifier: use assignment not short variable declaration.
+		e.linef("_ = %s", e.exprString(le.Value))
 		return
 	}
 	e.linef("%s := %s", le.Name, e.exprString(le.Value))
@@ -336,11 +381,32 @@ func (e *emitter) exprString(expr ast.Expr) string {
 			return "return " + e.exprString(ex.Value)
 		}
 		return "return"
+	case *ast.GoLiftCallExpr:
+		return e.goLiftCallExpr(ex)
 	case *ast.BadExpr:
 		return "/* bad expression */"
 	default:
 		return "/* unknown expression */"
 	}
+}
+
+// goLiftCallExpr emits an IIFE that converts a Go (T, error) or error-only call
+// into a Result value, allowing it to be used in expression position.
+func (e *emitter) goLiftCallExpr(lift *ast.GoLiftCallExpr) string {
+	call := e.exprString(lift.Call)
+	if lift.ValueGoType == "" {
+		// error-only: Result[struct{}, error]
+		const errOnlyFmt = "func() Result[struct{}, error] {" +
+			" if __e := %s; __e != nil { return ResultErr[struct{}, error]{Error: __e} };" +
+			" return ResultOk[struct{}, error]{} }()"
+		return fmt.Sprintf(errOnlyFmt, call)
+	}
+	vt := lift.ValueGoType
+	const tupleFmt = "func() Result[%s, error] {" +
+		" __v, __e := %s;" +
+		" if __e != nil { return ResultErr[%s, error]{Error: __e} };" +
+		" return ResultOk[%s, error]{Value: __v} }()"
+	return fmt.Sprintf(tupleFmt, vt, call, vt, vt)
 }
 
 func (e *emitter) binaryExpr(be *ast.BinaryExpr) string {
@@ -376,7 +442,25 @@ func (e *emitter) recordLit(rl *ast.RecordLit) string {
 	for i, f := range rl.Fields {
 		fields[i] = fmt.Sprintf("%s: %s", exportField(f.Name), e.exprString(f.Value))
 	}
-	return fmt.Sprintf("%s{%s}", rl.Name, strings.Join(fields, ", "))
+	// For built-in Result variants, include generic type args when the current
+	// function has a known Result return type (populated by emitFnDecl) or when
+	// the IIFE wrapper sets them. This is required for Go 1.18+ generics.
+	name := rl.Name
+	if e.resultTypeParams != "" {
+		switch rl.Name {
+		case builtinResultOk, builtinResultErr:
+			name = fmt.Sprintf("%s[%s]", rl.Name, e.resultTypeParams)
+		}
+	}
+	return fmt.Sprintf("%s{%s}", name, strings.Join(fields, ", "))
+}
+
+// identName returns the identifier name if expr is an *ast.Ident, otherwise "".
+func identName(expr ast.Expr) string {
+	if ident, ok := expr.(*ast.Ident); ok {
+		return ident.Name
+	}
+	return ""
 }
 
 func (e *emitter) blockExpr(be *ast.BlockExpr) string {
@@ -443,11 +527,12 @@ func (e *emitter) emitMatchStmt(me *ast.MatchExpr) {
 }
 
 func (e *emitter) emitTypeSwitchStmt(me *ast.MatchExpr) {
+	scrutineeName := identName(me.Scrutinee)
 	e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
 	for _, arm := range me.Arms {
 		switch p := arm.Pattern.(type) {
 		case *ast.ConstructorPattern:
-			e.linef("case %s:", p.Constructor)
+			e.linef("case %s:", e.constructorCaseLabel(p.Constructor, scrutineeName))
 			e.indent++
 			e.emitPatternBindings(p, "__match")
 			e.emitBody(arm.Body)
@@ -495,8 +580,30 @@ func (e *emitter) emitValueSwitchStmt(me *ast.MatchExpr) {
 
 func (e *emitter) emitPatternBindings(p *ast.ConstructorPattern, varName string) {
 	for _, fp := range p.Fields {
-		e.linef("%s := %s.%s", fp.Name, varName, exportField(fp.Name))
+		fieldName := fp.Name
+		if fp.OrigField != "" {
+			fieldName = fp.OrigField
+		}
+		e.linef("%s := %s.%s", fp.Name, varName, exportField(fieldName))
 	}
+}
+
+// constructorCaseLabel returns the Go type switch case label for a constructor,
+// adding generic type arguments when the scrutinee was produced by a GoLiftCallExpr.
+func (e *emitter) constructorCaseLabel(constructor, scrutineeName string) string {
+	if e.liftedVars == nil {
+		return constructor
+	}
+	vt, ok := e.liftedVars[scrutineeName]
+	if !ok {
+		return constructor
+	}
+	errType := "error"
+	valueType := vt
+	if valueType == "" {
+		valueType = "struct{}"
+	}
+	return fmt.Sprintf("%s[%s, %s]", constructor, valueType, errType)
 }
 
 // emitMatchAssign emits a match expression as a result variable assignment.
@@ -511,11 +618,12 @@ func (e *emitter) emitMatchAssign(name string, me *ast.MatchExpr) {
 }
 
 func (e *emitter) emitTypeSwitchAssign(name string, me *ast.MatchExpr) {
+	scrutineeName := identName(me.Scrutinee)
 	e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
 	for _, arm := range me.Arms {
 		switch p := arm.Pattern.(type) {
 		case *ast.ConstructorPattern:
-			e.linef("case %s:", p.Constructor)
+			e.linef("case %s:", e.constructorCaseLabel(p.Constructor, scrutineeName))
 			e.indent++
 			e.emitPatternBindings(p, "__match")
 			e.emitMatchArmAssign(name, arm.Body)
@@ -579,6 +687,7 @@ func (e *emitter) emitMatchArmAssign(name string, body []ast.Expr) {
 
 func (e *emitter) matchExprIIFE(me *ast.MatchExpr) string {
 	goType := e.inferMatchType(me)
+	scrutineeName := identName(me.Scrutinee)
 	var b strings.Builder
 	fmt.Fprintf(&b, "func() %s {\n", goType)
 	if isConstructorMatch(me) {
@@ -586,9 +695,13 @@ func (e *emitter) matchExprIIFE(me *ast.MatchExpr) string {
 		for _, arm := range me.Arms {
 			switch p := arm.Pattern.(type) {
 			case *ast.ConstructorPattern:
-				fmt.Fprintf(&b, "case %s:\n", p.Constructor)
+				fmt.Fprintf(&b, "case %s:\n", e.constructorCaseLabel(p.Constructor, scrutineeName))
 				for _, fp := range p.Fields {
-					fmt.Fprintf(&b, "%s := __match.%s\n", fp.Name, exportField(fp.Name))
+					fieldName := fp.Name
+					if fp.OrigField != "" {
+						fieldName = fp.OrigField
+					}
+					fmt.Fprintf(&b, "%s := __match.%s\n", fp.Name, exportField(fieldName))
 				}
 				e.writeMatchArmReturn(&b, arm.Body)
 			case *ast.VarPattern:
@@ -798,6 +911,10 @@ func scanExpr(expr ast.Expr, needsResult, needsOption *bool) {
 		}
 	case *ast.FnLit:
 		scanExprForBuiltins(e.Body, needsResult, needsOption)
+	case *ast.GoLiftCallExpr:
+		// GoLiftCallExpr always wraps its result in Result[...], so Result builtins are needed.
+		*needsResult = true
+		scanExpr(e.Call, needsResult, needsOption)
 	}
 }
 
@@ -847,6 +964,8 @@ func goTypeName(name string) string {
 		return goBool
 	case "Any":
 		return goAny
+	case "Error":
+		return "error"
 	default:
 		return name
 	}

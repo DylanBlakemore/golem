@@ -14,6 +14,7 @@ import (
 	"github.com/dylanblakemore/golem/internal/codegen"
 	"github.com/dylanblakemore/golem/internal/desugar"
 	"github.com/dylanblakemore/golem/internal/diagnostic"
+	"github.com/dylanblakemore/golem/internal/golifter"
 	"github.com/dylanblakemore/golem/internal/goloader"
 	"github.com/dylanblakemore/golem/internal/lexer"
 	"github.com/dylanblakemore/golem/internal/parser"
@@ -150,12 +151,13 @@ func compileFile(file string, verbose bool, loader *goloader.Loader) bool {
 	}
 	src := string(source)
 
-	mod, ok := frontendPipeline(file, src, verbose, loader)
+	mod, res, ok := frontendPipeline(file, src, verbose, loader)
 	if !ok {
 		return false
 	}
 
-	result := timedDesugar(file, mod, verbose)
+	lifted := golifter.Lift(mod, res, loader)
+	result := timedDesugar(file, lifted, verbose)
 
 	out, err := timedCodegen(file, result.Module, verbose)
 	if err != nil {
@@ -167,7 +169,7 @@ func compileFile(file string, verbose bool, loader *goloader.Loader) bool {
 }
 
 // frontendPipeline runs lex, parse, resolve, and type check.
-func frontendPipeline(file, src string, verbose bool, loader *goloader.Loader) (*ast.Module, bool) {
+func frontendPipeline(file, src string, verbose bool, loader *goloader.Loader) (*ast.Module, *resolver.Resolution, bool) {
 	start := time.Now()
 	l := lexer.New(src, file)
 	tokens := l.Tokenize()
@@ -183,7 +185,7 @@ func frontendPipeline(file, src string, verbose bool, loader *goloader.Loader) (
 	}
 	if len(perrs) > 0 {
 		printParseErrors(perrs, "parse", src)
-		return nil, false
+		return nil, nil, false
 	}
 
 	start = time.Now()
@@ -193,7 +195,7 @@ func frontendPipeline(file, src string, verbose bool, loader *goloader.Loader) (
 	}
 	if len(rerrs) > 0 {
 		printResolveErrors(rerrs, "resolve", src)
-		return nil, false
+		return nil, nil, false
 	}
 
 	start = time.Now()
@@ -206,10 +208,10 @@ func frontendPipeline(file, src string, verbose bool, loader *goloader.Loader) (
 	}
 	if len(cerrs) > 0 {
 		printCheckErrors(cerrs, "type", src)
-		return nil, false
+		return nil, nil, false
 	}
 
-	return mod, true
+	return mod, res, true
 }
 
 func timedDesugar(file string, mod *ast.Module, verbose bool) *desugar.Result {
