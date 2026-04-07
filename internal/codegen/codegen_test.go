@@ -729,3 +729,70 @@ func TestResultCompositeWithTypeParams(t *testing.T) {
 end`)
 	assertContains(t, out, "ResultOk[int, error]")
 }
+
+// --- Nested pattern matching code generation ---
+
+func TestNestedPatternMatchCodegen(t *testing.T) {
+	out := generate(t, `type Role =
+  | Admin
+  | Member { team: String }
+
+type Response =
+  | Success { value: Role }
+  | Failure { reason: String }
+
+pub fn check(r: Response): String do
+  match r do
+    | Success { value: Admin } -> "admin"
+    | Success { value: Member { team } } -> team
+    | Failure { reason } -> reason
+  end
+end`)
+	// Outer switch on Response
+	assertContains(t, out, "switch __match := r.(type)")
+	// Inner switch on Role
+	assertContains(t, out, "switch __nest_0 :=")
+	assertContains(t, out, "case responseSuccess:")
+	assertContains(t, out, "case roleAdmin:")
+	assertContains(t, out, "case roleMember:")
+	assertContains(t, out, "case responseFailure:")
+	assertContains(t, out, "team := __nest_0.Team")
+	assertContains(t, out, `reason := __match.Reason`)
+}
+
+func TestNestedPatternVarRenameCodegen(t *testing.T) {
+	out := generate(t, `type Wrapper =
+  | W { inner: Int }
+
+pub fn get(w: Wrapper): Int do
+  match w do
+    | W { inner: x } -> x
+  end
+end`)
+	assertContains(t, out, "x := __match.Inner")
+}
+
+func TestDeepNestedPatternCodegen(t *testing.T) {
+	out := generate(t, `type Inner =
+  | Leaf { x: Int }
+  | Empty
+
+type Middle =
+  | Mid { inner: Inner }
+
+type Outer =
+  | Top { middle: Middle }
+
+pub fn deep(o: Outer): Int do
+  match o do
+    | Top { middle: Mid { inner: Leaf { x } } } -> x
+    | Top { middle: Mid { inner: Empty } } -> 0
+  end
+end`)
+	// Should have nested switches
+	assertContains(t, out, "switch __match := o.(type)")
+	assertContains(t, out, "case outerTop:")
+	assertContains(t, out, "case middleMid:")
+	assertContains(t, out, "case innerLeaf:")
+	assertContains(t, out, "case innerEmpty:")
+}

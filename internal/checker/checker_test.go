@@ -958,3 +958,64 @@ fn serve(): Result<Int, Error> do
 end`)
 	expectNoErrors(t, errs)
 }
+
+// --- Nested pattern type checking ---
+
+func TestNestedPatternVariableBinding(t *testing.T) {
+	_, errs := check(`type Role =
+  | Admin
+  | Member { team: String }
+
+type Response =
+  | Success { value: Role }
+  | Failure { reason: String }
+
+fn check(r: Response): String do
+  match r do
+    | Success { value: Admin } -> "admin"
+    | Success { value: Member { team } } -> team
+    | Failure { reason } -> reason
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestNestedPatternDeepBinding(t *testing.T) {
+	_, errs := check(`type Inner =
+  | A { x: Int }
+  | B
+
+type Middle =
+  | M { inner: Inner }
+
+type Outer =
+  | O { middle: Middle }
+
+fn deep(o: Outer): Int do
+  match o do
+    | O { middle: M { inner: A { x } } } -> x
+    | O { middle: M { inner: B } } -> 0
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestNestedPatternFieldTypeMismatch(t *testing.T) {
+	_, errs := check(`type Role =
+  | Admin
+  | Member { team: String }
+
+type Response =
+  | Success { value: Int }
+  | Failure { reason: String }
+
+fn check(r: Response): String do
+  match r do
+    | Success { value: Admin } -> "admin"
+    | _ -> "other"
+  end
+end`)
+	if len(errs) == 0 {
+		t.Fatal("expected type error for matching constructor against non-sum field")
+	}
+}

@@ -1426,3 +1426,171 @@ end`)
 		t.Fatalf("expected CallExpr inside ?, got %T", prop.Expr)
 	}
 }
+
+// --- Nested pattern matching ---
+
+func TestParseNestedConstructorPattern(t *testing.T) {
+	source := `type Role =
+  | Admin
+  | Member { team: String }
+
+type Response =
+  | Success { value: Role }
+  | Failure { reason: String }
+
+fn check(r: Response): String do
+  match r do
+    | Success { value: Admin } -> "admin"
+    | Success { value: Member { team } } -> team
+    | Failure { reason } -> reason
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[2].(*ast.FnDecl)
+	matchExpr := fn.Body[0].(*ast.MatchExpr)
+
+	if len(matchExpr.Arms) != 3 {
+		t.Fatalf("expected 3 arms, got %d", len(matchExpr.Arms))
+	}
+
+	// First arm: Success { value: Admin }
+	arm0 := matchExpr.Arms[0]
+	cp0, ok := arm0.Pattern.(*ast.ConstructorPattern)
+	if !ok {
+		t.Fatalf("expected ConstructorPattern, got %T", arm0.Pattern)
+	}
+	if cp0.Constructor != "Success" {
+		t.Errorf("expected 'Success', got %q", cp0.Constructor)
+	}
+	if len(cp0.Fields) != 1 {
+		t.Fatalf("expected 1 field, got %d", len(cp0.Fields))
+	}
+	if cp0.Fields[0].Name != "value" {
+		t.Errorf("expected field 'value', got %q", cp0.Fields[0].Name)
+	}
+	innerCp, ok := cp0.Fields[0].Pattern.(*ast.ConstructorPattern)
+	if !ok {
+		t.Fatalf("expected nested ConstructorPattern, got %T", cp0.Fields[0].Pattern)
+	}
+	if innerCp.Constructor != "Admin" {
+		t.Errorf("expected nested constructor 'Admin', got %q", innerCp.Constructor)
+	}
+
+	// Second arm: Success { value: Member { team } }
+	arm1 := matchExpr.Arms[1]
+	cp1 := arm1.Pattern.(*ast.ConstructorPattern)
+	innerCp1, ok := cp1.Fields[0].Pattern.(*ast.ConstructorPattern)
+	if !ok {
+		t.Fatalf("expected nested ConstructorPattern, got %T", cp1.Fields[0].Pattern)
+	}
+	if innerCp1.Constructor != "Member" {
+		t.Errorf("expected 'Member', got %q", innerCp1.Constructor)
+	}
+	if len(innerCp1.Fields) != 1 || innerCp1.Fields[0].Name != "team" {
+		t.Errorf("expected field 'team' in nested pattern")
+	}
+
+	// Third arm: Failure { reason } — no nested pattern
+	arm2 := matchExpr.Arms[2]
+	cp2 := arm2.Pattern.(*ast.ConstructorPattern)
+	if cp2.Fields[0].Pattern != nil {
+		t.Errorf("expected nil Pattern for simple field binding")
+	}
+}
+
+func TestParseNestedPatternWithVarBinding(t *testing.T) {
+	source := `type Wrapper =
+  | W { inner: Int }
+
+fn get(w: Wrapper): Int do
+  match w do
+    | W { inner: x } -> x
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[1].(*ast.FnDecl)
+	matchExpr := fn.Body[0].(*ast.MatchExpr)
+	cp := matchExpr.Arms[0].Pattern.(*ast.ConstructorPattern)
+
+	if cp.Fields[0].Name != "inner" {
+		t.Errorf("expected field name 'inner', got %q", cp.Fields[0].Name)
+	}
+	vp, ok := cp.Fields[0].Pattern.(*ast.VarPattern)
+	if !ok {
+		t.Fatalf("expected VarPattern, got %T", cp.Fields[0].Pattern)
+	}
+	if vp.Name != "x" {
+		t.Errorf("expected var 'x', got %q", vp.Name)
+	}
+}
+
+func TestParseNestedPatternWithWildcard(t *testing.T) {
+	source := `type Wrapper =
+  | W { inner: Int }
+
+fn ignore(w: Wrapper): Int do
+  match w do
+    | W { inner: _ } -> 0
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[1].(*ast.FnDecl)
+	matchExpr := fn.Body[0].(*ast.MatchExpr)
+	cp := matchExpr.Arms[0].Pattern.(*ast.ConstructorPattern)
+
+	_, ok := cp.Fields[0].Pattern.(*ast.WildcardPattern)
+	if !ok {
+		t.Fatalf("expected WildcardPattern, got %T", cp.Fields[0].Pattern)
+	}
+}
+
+func TestParseDeepNestedPattern(t *testing.T) {
+	source := `type Inner =
+  | A { x: Int }
+  | B
+
+type Middle =
+  | M { inner: Inner }
+
+type Outer =
+  | O { middle: Middle }
+
+fn deep(o: Outer): Int do
+  match o do
+    | O { middle: M { inner: A { x } } } -> x
+    | O { middle: M { inner: B } } -> 0
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[3].(*ast.FnDecl)
+	matchExpr := fn.Body[0].(*ast.MatchExpr)
+
+	// First arm: O { middle: M { inner: A { x } } }
+	cp := matchExpr.Arms[0].Pattern.(*ast.ConstructorPattern)
+	if cp.Constructor != "O" {
+		t.Errorf("expected 'O', got %q", cp.Constructor)
+	}
+	m := cp.Fields[0].Pattern.(*ast.ConstructorPattern)
+	if m.Constructor != "M" {
+		t.Errorf("expected 'M', got %q", m.Constructor)
+	}
+	a := m.Fields[0].Pattern.(*ast.ConstructorPattern)
+	if a.Constructor != "A" {
+		t.Errorf("expected 'A', got %q", a.Constructor)
+	}
+	if a.Fields[0].Name != "x" {
+		t.Errorf("expected field 'x', got %q", a.Fields[0].Name)
+	}
+}

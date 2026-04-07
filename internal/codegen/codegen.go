@@ -252,30 +252,16 @@ func (e *emitter) emitMatchReturn(me *ast.MatchExpr) {
 
 func (e *emitter) emitTypeSwitchReturn(me *ast.MatchExpr) {
 	scrutineeName := identName(me.Scrutinee)
+	groups := groupArmsByConstructor(me.Arms)
 	hasDefault := false
 	e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
-	for _, arm := range me.Arms {
-		switch p := arm.Pattern.(type) {
-		case *ast.ConstructorPattern:
-			e.linef("case %s:", e.constructorCaseLabel(p.Constructor, scrutineeName))
-			e.indent++
-			e.emitPatternBindings(p, "__match")
-			e.emitMatchArmReturn(arm.Body)
-			e.indent--
-		case *ast.VarPattern:
+	for _, g := range groups {
+		if g.isDefault {
 			hasDefault = true
-			e.linef("default:")
-			e.indent++
-			e.linef("%s := __match", p.Name)
-			e.emitMatchArmReturn(arm.Body)
-			e.indent--
-		case *ast.WildcardPattern:
-			hasDefault = true
-			e.linef("default:")
-			e.indent++
-			e.emitMatchArmReturn(arm.Body)
-			e.indent--
 		}
+		e.emitArmGroup(g, "__match", scrutineeName, 0, func(arm *ast.MatchArm) {
+			e.emitMatchArmReturn(arm.Body)
+		})
 	}
 	e.linef("}")
 	if !hasDefault {
@@ -646,6 +632,72 @@ func isConstructorMatch(me *ast.MatchExpr) bool {
 	return false
 }
 
+// armGroup represents a group of match arms sharing the same outer constructor.
+type armGroup struct {
+	constructor string
+	arms        []*ast.MatchArm
+	isDefault   bool
+}
+
+// groupArmsByConstructor groups match arms by their outer constructor name.
+// Wildcard/var patterns are placed in a single default group.
+func groupArmsByConstructor(arms []*ast.MatchArm) []*armGroup {
+	var groups []*armGroup
+	idx := make(map[string]int)
+	for _, arm := range arms {
+		switch p := arm.Pattern.(type) {
+		case *ast.ConstructorPattern:
+			if i, ok := idx[p.Constructor]; ok {
+				groups[i].arms = append(groups[i].arms, arm)
+			} else {
+				idx[p.Constructor] = len(groups)
+				groups = append(groups, &armGroup{
+					constructor: p.Constructor,
+					arms:        []*ast.MatchArm{arm},
+				})
+			}
+		default:
+			groups = append(groups, &armGroup{
+				arms:      []*ast.MatchArm{arm},
+				isDefault: true,
+			})
+		}
+	}
+	return groups
+}
+
+// hasNestedConstructorPattern checks if any field in a constructor pattern
+// has a nested constructor pattern.
+func hasNestedConstructorPattern(cp *ast.ConstructorPattern) bool {
+	for _, fp := range cp.Fields {
+		if fp.Pattern != nil {
+			if _, ok := fp.Pattern.(*ast.ConstructorPattern); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// findNestedFieldIdx returns the index of the first field with a nested
+// constructor pattern in any of the given arms. Returns -1 if none found.
+func findNestedFieldIdx(arms []*ast.MatchArm) int {
+	for _, arm := range arms {
+		cp, ok := arm.Pattern.(*ast.ConstructorPattern)
+		if !ok {
+			continue
+		}
+		for i, fp := range cp.Fields {
+			if fp.Pattern != nil {
+				if _, ok := fp.Pattern.(*ast.ConstructorPattern); ok {
+					return i
+				}
+			}
+		}
+	}
+	return -1
+}
+
 // emitMatchStmt emits a match expression in statement position.
 func (e *emitter) emitMatchStmt(me *ast.MatchExpr) {
 	if isConstructorMatch(me) {
@@ -657,29 +709,243 @@ func (e *emitter) emitMatchStmt(me *ast.MatchExpr) {
 
 func (e *emitter) emitTypeSwitchStmt(me *ast.MatchExpr) {
 	scrutineeName := identName(me.Scrutinee)
+	groups := groupArmsByConstructor(me.Arms)
 	e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
-	for _, arm := range me.Arms {
-		switch p := arm.Pattern.(type) {
-		case *ast.ConstructorPattern:
-			e.linef("case %s:", e.constructorCaseLabel(p.Constructor, scrutineeName))
-			e.indent++
-			e.emitPatternBindings(p, "__match")
+	for _, g := range groups {
+		e.emitArmGroup(g, "__match", scrutineeName, 0, func(arm *ast.MatchArm) {
 			e.emitBody(arm.Body)
-			e.indent--
-		case *ast.VarPattern:
-			e.linef("default:")
-			e.indent++
-			e.linef("%s := __match", p.Name)
-			e.emitBody(arm.Body)
-			e.indent--
-		case *ast.WildcardPattern:
-			e.linef("default:")
-			e.indent++
-			e.emitBody(arm.Body)
-			e.indent--
-		}
+		})
 	}
 	e.linef("}")
+}
+
+// emitArmGroup emits a single constructor group within a type switch.
+// depth tracks nesting level for generating unique variable names.
+//
+//nolint:unparam // matchVar is always __match at top level but kept parameterized for nested switches
+func (e *emitter) emitArmGroup(g *armGroup, matchVar, scrutineeName string, depth int, emitBody func(*ast.MatchArm)) {
+	if g.isDefault {
+		e.linef("default:")
+		e.indent++
+		arm := g.arms[0]
+		if vp, ok := arm.Pattern.(*ast.VarPattern); ok {
+			e.linef("%s := %s", vp.Name, matchVar)
+		}
+		emitBody(arm)
+		e.indent--
+		return
+	}
+
+	e.linef("case %s:", e.constructorCaseLabel(g.constructor, scrutineeName))
+	e.indent++
+
+	nestedIdx := findNestedFieldIdx(g.arms)
+	if nestedIdx == -1 && len(g.arms) == 1 {
+		// Simple case: single arm, no nested constructor patterns
+		cp := g.arms[0].Pattern.(*ast.ConstructorPattern)
+		e.emitPatternBindings(cp, matchVar)
+		emitBody(g.arms[0])
+		e.indent--
+		return
+	}
+
+	if nestedIdx == -1 {
+		// Multiple arms, same constructor, but no nesting — emit first arm
+		cp := g.arms[0].Pattern.(*ast.ConstructorPattern)
+		e.emitPatternBindings(cp, matchVar)
+		emitBody(g.arms[0])
+		e.indent--
+		return
+	}
+
+	// Has nested constructor patterns — emit inner type switch
+	cp0 := g.arms[0].Pattern.(*ast.ConstructorPattern)
+	nestedFp := cp0.Fields[nestedIdx]
+	fieldGoName := nestedFp.Name
+	if nestedFp.OrigField != "" {
+		fieldGoName = nestedFp.OrigField
+	}
+
+	nestVar := fmt.Sprintf("__nest_%d", depth)
+	e.linef("switch %s := %s.%s.(type) {", nestVar, matchVar, exportField(fieldGoName))
+
+	// Group inner patterns by their constructor
+	innerGroups := e.groupInnerPatterns(g.arms, nestedIdx)
+	for _, ig := range innerGroups {
+		e.emitInnerGroup(ig, matchVar, nestVar, nestedIdx, depth, emitBody)
+	}
+
+	e.linef("}")
+	e.indent--
+}
+
+// innerArmGroup represents a group of arms sharing the same inner constructor at a nested field.
+type innerArmGroup struct {
+	constructor string
+	arms        []*ast.MatchArm
+	innerCps    []*ast.ConstructorPattern // the inner constructor patterns
+	isDefault   bool
+}
+
+// groupInnerPatterns groups arms by the inner pattern at the specified field index.
+func (e *emitter) groupInnerPatterns(arms []*ast.MatchArm, fieldIdx int) []*innerArmGroup {
+	var groups []*innerArmGroup
+	idx := make(map[string]int)
+	for _, arm := range arms {
+		cp := arm.Pattern.(*ast.ConstructorPattern)
+		fp := cp.Fields[fieldIdx]
+		if fp.Pattern == nil {
+			// Shorthand binding — treat as default (binds field to variable)
+			groups = append(groups, &innerArmGroup{
+				arms:      []*ast.MatchArm{arm},
+				isDefault: true,
+			})
+			continue
+		}
+		switch inner := fp.Pattern.(type) {
+		case *ast.ConstructorPattern:
+			if i, ok := idx[inner.Constructor]; ok {
+				groups[i].arms = append(groups[i].arms, arm)
+				groups[i].innerCps = append(groups[i].innerCps, inner)
+			} else {
+				idx[inner.Constructor] = len(groups)
+				groups = append(groups, &innerArmGroup{
+					constructor: inner.Constructor,
+					arms:        []*ast.MatchArm{arm},
+					innerCps:    []*ast.ConstructorPattern{inner},
+				})
+			}
+		case *ast.VarPattern, *ast.WildcardPattern:
+			groups = append(groups, &innerArmGroup{
+				arms:      []*ast.MatchArm{arm},
+				isDefault: true,
+			})
+		}
+	}
+	return groups
+}
+
+// emitInnerGroup emits a case within a nested type switch.
+func (e *emitter) emitInnerGroup(ig *innerArmGroup, outerVar, nestVar string, nestedFieldIdx, depth int, emitBody func(*ast.MatchArm)) {
+	arm := ig.arms[0]
+	cp := arm.Pattern.(*ast.ConstructorPattern)
+
+	if ig.isDefault {
+		e.linef("default:")
+		e.indent++
+		// Emit non-nested field bindings
+		e.emitNonNestedBindings(cp, outerVar, nestedFieldIdx)
+		// Handle the default inner binding
+		fp := cp.Fields[nestedFieldIdx]
+		if fp.Pattern == nil {
+			e.linef("%s := %s", fp.Name, nestVar)
+		} else if vp, ok := fp.Pattern.(*ast.VarPattern); ok {
+			e.linef("%s := %s", vp.Name, nestVar)
+		}
+		emitBody(arm)
+		e.indent--
+		return
+	}
+
+	e.linef("case %s:", ig.constructor)
+	e.indent++
+
+	innerCp := ig.innerCps[0]
+	// Check for deeper nesting
+	if hasNestedConstructorPattern(innerCp) {
+		// Emit non-nested field bindings from outer
+		e.emitNonNestedBindings(cp, outerVar, nestedFieldIdx)
+		// Recurse: create inner arm group
+		innerGroup := &armGroup{
+			constructor: ig.constructor,
+			arms:        ig.arms,
+		}
+		// Transform arms to use inner patterns
+		transformedArms := make([]*ast.MatchArm, len(ig.arms))
+		for i, a := range ig.arms {
+			transformedArms[i] = &ast.MatchArm{
+				Span:    a.Span,
+				Pattern: ig.innerCps[i],
+				Body:    a.Body,
+			}
+		}
+		innerGroup.arms = transformedArms
+		nestedIdx2 := findNestedFieldIdx(transformedArms)
+		if nestedIdx2 != -1 {
+			// Deeper nesting — recurse via a new arm group
+			ig2 := &armGroup{
+				constructor: ig.constructor,
+				arms:        transformedArms,
+			}
+			// Re-emit as nested
+			e.emitNestedBody(ig2, nestVar, depth+1, emitBody)
+		} else {
+			e.emitPatternBindings(innerCp, nestVar)
+			emitBody(arm)
+		}
+	} else {
+		// Emit non-nested field bindings from outer
+		e.emitNonNestedBindings(cp, outerVar, nestedFieldIdx)
+		// Emit inner field bindings
+		e.emitPatternBindings(innerCp, nestVar)
+		emitBody(arm)
+	}
+
+	e.indent--
+}
+
+// emitNestedBody handles the body of a constructor group that has nested patterns.
+// It emits the inner type switch for the nested field.
+func (e *emitter) emitNestedBody(g *armGroup, matchVar string, depth int, emitBody func(*ast.MatchArm)) {
+	nestedIdx := findNestedFieldIdx(g.arms)
+	if nestedIdx == -1 {
+		// No more nesting
+		cp := g.arms[0].Pattern.(*ast.ConstructorPattern)
+		e.emitPatternBindings(cp, matchVar)
+		emitBody(g.arms[0])
+		return
+	}
+
+	cp0 := g.arms[0].Pattern.(*ast.ConstructorPattern)
+	nestedFp := cp0.Fields[nestedIdx]
+	fieldGoName := nestedFp.Name
+	if nestedFp.OrigField != "" {
+		fieldGoName = nestedFp.OrigField
+	}
+
+	nestVar := fmt.Sprintf("__nest_%d", depth)
+	e.linef("switch %s := %s.%s.(type) {", nestVar, matchVar, exportField(fieldGoName))
+
+	innerGroups := e.groupInnerPatterns(g.arms, nestedIdx)
+	for _, ig := range innerGroups {
+		e.emitInnerGroup(ig, matchVar, nestVar, nestedIdx, depth, emitBody)
+	}
+
+	e.linef("}")
+}
+
+// emitNonNestedBindings emits field bindings for all fields except the nested one.
+func (e *emitter) emitNonNestedBindings(cp *ast.ConstructorPattern, varName string, skipIdx int) {
+	for i, fp := range cp.Fields {
+		if i == skipIdx {
+			continue
+		}
+		e.emitSingleFieldBinding(fp, varName)
+	}
+}
+
+// emitSingleFieldBinding emits a single field binding, handling var/wildcard patterns.
+func (e *emitter) emitSingleFieldBinding(fp *ast.FieldPattern, varName string) {
+	fieldName := fp.Name
+	if fp.OrigField != "" {
+		fieldName = fp.OrigField
+	}
+	if fp.Pattern == nil {
+		e.linef("%s := %s.%s", fp.Name, varName, exportField(fieldName))
+	} else if vp, ok := fp.Pattern.(*ast.VarPattern); ok {
+		e.linef("%s := %s.%s", vp.Name, varName, exportField(fieldName))
+	}
+	// WildcardPattern: no binding needed
 }
 
 func (e *emitter) emitValueSwitchStmt(me *ast.MatchExpr) {
@@ -709,11 +975,7 @@ func (e *emitter) emitValueSwitchStmt(me *ast.MatchExpr) {
 
 func (e *emitter) emitPatternBindings(p *ast.ConstructorPattern, varName string) {
 	for _, fp := range p.Fields {
-		fieldName := fp.Name
-		if fp.OrigField != "" {
-			fieldName = fp.OrigField
-		}
-		e.linef("%s := %s.%s", fp.Name, varName, exportField(fieldName))
+		e.emitSingleFieldBinding(fp, varName)
 	}
 }
 
@@ -748,27 +1010,12 @@ func (e *emitter) emitMatchAssign(name string, me *ast.MatchExpr) {
 
 func (e *emitter) emitTypeSwitchAssign(name string, me *ast.MatchExpr) {
 	scrutineeName := identName(me.Scrutinee)
+	groups := groupArmsByConstructor(me.Arms)
 	e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
-	for _, arm := range me.Arms {
-		switch p := arm.Pattern.(type) {
-		case *ast.ConstructorPattern:
-			e.linef("case %s:", e.constructorCaseLabel(p.Constructor, scrutineeName))
-			e.indent++
-			e.emitPatternBindings(p, "__match")
+	for _, g := range groups {
+		e.emitArmGroup(g, "__match", scrutineeName, 0, func(arm *ast.MatchArm) {
 			e.emitMatchArmAssign(name, arm.Body)
-			e.indent--
-		case *ast.VarPattern:
-			e.linef("default:")
-			e.indent++
-			e.linef("%s := __match", p.Name)
-			e.emitMatchArmAssign(name, arm.Body)
-			e.indent--
-		case *ast.WildcardPattern:
-			e.linef("default:")
-			e.indent++
-			e.emitMatchArmAssign(name, arm.Body)
-			e.indent--
-		}
+		})
 	}
 	e.linef("}")
 }
@@ -816,63 +1063,66 @@ func (e *emitter) emitMatchArmAssign(name string, body []ast.Expr) {
 
 func (e *emitter) matchExprIIFE(me *ast.MatchExpr) string {
 	goType := e.inferMatchType(me)
-	scrutineeName := identName(me.Scrutinee)
-	var b strings.Builder
-	fmt.Fprintf(&b, "func() %s {\n", goType)
+
+	// Temporarily redirect emitter output to capture IIFE body.
+	savedBuf := e.buf
+	savedIndent := e.indent
+	e.buf = strings.Builder{}
+	e.indent = 0
+
 	if isConstructorMatch(me) {
-		fmt.Fprintf(&b, "switch __match := %s.(type) {\n", e.exprString(me.Scrutinee))
-		for _, arm := range me.Arms {
-			switch p := arm.Pattern.(type) {
-			case *ast.ConstructorPattern:
-				fmt.Fprintf(&b, "case %s:\n", e.constructorCaseLabel(p.Constructor, scrutineeName))
-				for _, fp := range p.Fields {
-					fieldName := fp.Name
-					if fp.OrigField != "" {
-						fieldName = fp.OrigField
-					}
-					fmt.Fprintf(&b, "%s := __match.%s\n", fp.Name, exportField(fieldName))
-				}
-				e.writeMatchArmReturn(&b, arm.Body)
-			case *ast.VarPattern:
-				b.WriteString("default:\n")
-				fmt.Fprintf(&b, "%s := __match\n", p.Name)
-				e.writeMatchArmReturn(&b, arm.Body)
-			case *ast.WildcardPattern:
-				b.WriteString("default:\n")
-				e.writeMatchArmReturn(&b, arm.Body)
-			}
+		scrutineeName := identName(me.Scrutinee)
+		groups := groupArmsByConstructor(me.Arms)
+		e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
+		for _, g := range groups {
+			e.emitArmGroup(g, "__match", scrutineeName, 0, func(arm *ast.MatchArm) {
+				e.emitReturnBody(arm.Body)
+			})
 		}
+		e.linef("}")
 	} else {
-		fmt.Fprintf(&b, "switch %s {\n", e.exprString(me.Scrutinee))
+		e.linef("switch %s {", e.exprString(me.Scrutinee))
 		for _, arm := range me.Arms {
 			switch p := arm.Pattern.(type) {
 			case *ast.LiteralPattern:
-				fmt.Fprintf(&b, "case %s:\n", e.exprString(p.Value))
-				e.writeMatchArmReturn(&b, arm.Body)
+				e.linef("case %s:", e.exprString(p.Value))
+				e.indent++
+				e.emitReturnBody(arm.Body)
+				e.indent--
 			case *ast.VarPattern:
-				b.WriteString("default:\n")
-				fmt.Fprintf(&b, "%s := %s\n", p.Name, e.exprString(me.Scrutinee))
-				e.writeMatchArmReturn(&b, arm.Body)
+				e.linef("default:")
+				e.indent++
+				e.linef("%s := %s", p.Name, e.exprString(me.Scrutinee))
+				e.emitReturnBody(arm.Body)
+				e.indent--
 			case *ast.WildcardPattern:
-				b.WriteString("default:\n")
-				e.writeMatchArmReturn(&b, arm.Body)
+				e.linef("default:")
+				e.indent++
+				e.emitReturnBody(arm.Body)
+				e.indent--
 			}
 		}
+		e.linef("}")
 	}
-	b.WriteString("}\nreturn *new(")
-	b.WriteString(goType)
-	b.WriteString(")\n}()")
+
+	body := e.buf.String()
+	e.buf = savedBuf
+	e.indent = savedIndent
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "func() %s {\n%sreturn *new(%s)\n}()", goType, body, goType)
 	return b.String()
 }
 
-func (e *emitter) writeMatchArmReturn(b *strings.Builder, body []ast.Expr) {
+// emitReturnBody emits the body of a match arm as return statements for IIFE context.
+func (e *emitter) emitReturnBody(body []ast.Expr) {
 	if len(body) == 0 {
 		return
 	}
 	for _, stmt := range body[:len(body)-1] {
-		fmt.Fprintf(b, "%s\n", e.exprString(stmt))
+		e.linef("%s", e.exprString(stmt))
 	}
-	fmt.Fprintf(b, "return %s\n", e.exprString(body[len(body)-1]))
+	e.linef("return %s", e.exprString(body[len(body)-1]))
 }
 
 func (e *emitter) inferMatchType(me *ast.MatchExpr) string {

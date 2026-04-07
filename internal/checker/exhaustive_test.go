@@ -278,3 +278,61 @@ fn name(c: Color): String do
 end`)
 	expectNoErrors(t, errs)
 }
+
+// --- Nested pattern exhaustiveness ---
+
+func TestNestedExhaustiveAllVariants(t *testing.T) {
+	_, errs := check(`type Role =
+  | Admin
+  | Member { team: String }
+
+type Response =
+  | Success { value: Role }
+  | Failure { reason: String }
+
+fn check(r: Response): String do
+  match r do
+    | Success { value: Admin } -> "admin"
+    | Success { value: Member { team } } -> team
+    | Failure { reason } -> reason
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestNestedNonExhaustiveMissingInnerVariant(t *testing.T) {
+	_, errs := check(`type Role =
+  | Admin
+  | Member { team: String }
+
+type Response =
+  | Success { value: Role }
+  | Failure { reason: String }
+
+fn check(r: Response): String do
+  match r do
+    | Success { value: Admin } -> "admin"
+    | Failure { reason } -> reason
+  end
+end`)
+	expectErrorContains(t, errs, "non-exhaustive")
+}
+
+func TestNestedExhaustiveWithWildcard(t *testing.T) {
+	_, errs := check(`type Role =
+  | Admin
+  | Member { team: String }
+
+type Response =
+  | Success { value: Role }
+  | Failure { reason: String }
+
+fn check(r: Response): String do
+  match r do
+    | Success { value: Admin } -> "admin"
+    | Success { value: _ } -> "member"
+    | Failure { reason } -> reason
+  end
+end`)
+	expectNoErrors(t, errs)
+}

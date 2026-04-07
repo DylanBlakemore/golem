@@ -12,7 +12,7 @@
 Reference: [pattern-matching.md](../architecture/pattern-matching.md)
 
 ### Parsing
-- [ ] Nested constructor patterns:
+- [x] Nested constructor patterns:
   ```golem
   | Ok { value: User { name, role: Admin } } -> ...
   ```
@@ -20,15 +20,15 @@ Reference: [pattern-matching.md](../architecture/pattern-matching.md)
   ```golem
   | { config: { host, port } } -> ...
   ```
-- [ ] Arbitrary nesting depth
+- [x] Arbitrary nesting depth
 
 ### Type Checking
-- [ ] Recursively type-check nested patterns against nested types
-- [ ] Variable bindings at any nesting level introduced in scope
+- [x] Recursively type-check nested patterns against nested types
+- [x] Variable bindings at any nesting level introduced in scope
 
 ### Exhaustiveness
-- [ ] Extend pattern matrix to handle nested constructors
-- [ ] Specialization descends into sub-patterns
+- [x] Extend pattern matrix to handle nested constructors
+- [x] Specialization descends into sub-patterns
 - [ ] Missing pattern reconstruction for nested cases produces readable messages:
   ```
   Non-exhaustive match. Missing: Ok { value: User { role: Member } }
@@ -47,7 +47,7 @@ Reference: [pattern-matching.md](../architecture/pattern-matching.md)
       Bindings []Binding
   }
   ```
-- [ ] Nested type assertions with intermediate variable bindings:
+- [x] Nested type assertions with intermediate variable bindings:
   ```go
   switch v1 := response.(type) {
   case ResultOk[User, Error]:
@@ -64,10 +64,10 @@ Reference: [pattern-matching.md](../architecture/pattern-matching.md)
 - [ ] Identical subtrees merged (sharing optimization)
 
 ### Tests
-- [ ] Parse nested patterns (2+ levels deep)
-- [ ] Type check nested pattern variable bindings
-- [ ] Exhaustiveness on nested patterns
-- [ ] Code gen snapshot tests for nested switch chains
+- [x] Parse nested patterns (2+ levels deep)
+- [x] Type check nested pattern variable bindings
+- [x] Exhaustiveness on nested patterns
+- [x] Code gen snapshot tests for nested switch chains
 - [ ] Test subtree sharing optimization
 
 ---

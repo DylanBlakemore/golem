@@ -1314,10 +1314,18 @@ func (p *Parser) parseConstructorPattern(nameTok lexer.Token, name string) *ast.
 			continue
 		}
 
-		fields = append(fields, &ast.FieldPattern{
+		fp := &ast.FieldPattern{
 			Span: fieldTok.Span,
 			Name: fieldTok.Literal,
-		})
+		}
+
+		// field: Pattern — nested pattern or variable rename
+		if p.match(lexer.COLON) {
+			p.skipNewlines()
+			fp.Pattern = p.parsePattern()
+		}
+
+		fields = append(fields, fp)
 
 		if !p.check(lexer.RBRACE) {
 			if !p.match(lexer.COMMA) {
