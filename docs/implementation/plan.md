@@ -36,7 +36,7 @@ Golem is a statically typed, expression-oriented language that transpiles to idi
 > Sum types, pattern matching (flat), generics, Result/Option, Go package imports with type mapping.
 > **Exit Criteria:** Model a domain with ADTs, call Go stdlib, handle errors with `?`.
 
-- [ ] [Phase 1: Type System Core](./phase-1-type-system.md)
+- [x] [Phase 1: Type System Core](./phase-1-type-system.md)
   - [x] 1.1 — Sum types (algebraic data types)
   - [x] 1.2 — Flat pattern matching
   - [x] 1.3 — Exhaustiveness checking (Maranget algorithm)
@@ -45,7 +45,7 @@ Golem is a statically typed, expression-oriented language that transpiles to idi
   - [x] 1.6 — `?` operator (error propagation)
   - [x] 1.7 — Go package import with type mapping
   - [x] 1.8 — Auto-lifting `(T, error)` to `Result<T, Error>`
-  - [ ] 1.9 — End-to-end integration test (ADT domain model + Go stdlib calls)
+  - [x] 1.9 — End-to-end integration test (ADT domain model + Go stdlib calls)
 
 ---
 

@@ -168,7 +168,7 @@ func (e *emitter) emitFnDecl(fn *ast.FnDecl) {
 
 	e.linef("func %s%s(%s)%s {", fn.Name, typeParamDecl, params, ret)
 	e.indent++
-	e.emitBody(fn.Body)
+	e.emitBodyWithTail(fn.Body, fn.ReturnType != nil)
 	e.indent--
 	e.linef("}")
 
@@ -212,6 +212,135 @@ func (e *emitter) emitBody(stmts []ast.Expr) {
 	for _, stmt := range stmts {
 		e.emitStmt(stmt)
 	}
+}
+
+// emitBodyWithTail emits all but the last statement normally, then emits the
+// last statement in tail position (with return semantics) when withReturn is true.
+func (e *emitter) emitBodyWithTail(stmts []ast.Expr, withReturn bool) {
+	if !withReturn || len(stmts) == 0 {
+		e.emitBody(stmts)
+		return
+	}
+	e.emitBody(stmts[:len(stmts)-1])
+	e.emitTailStmt(stmts[len(stmts)-1])
+}
+
+// emitTailStmt emits a statement in tail position, adding return semantics.
+func (e *emitter) emitTailStmt(expr ast.Expr) {
+	switch s := expr.(type) {
+	case *ast.ReturnExpr:
+		e.emitStmt(s) // already explicit return
+	case *ast.MatchExpr:
+		e.emitMatchReturn(s)
+	case *ast.IfExpr:
+		e.emitIfReturn(s)
+	case *ast.LetExpr:
+		e.emitStmt(s) // let in tail position: value is discarded
+	default:
+		e.linef("return %s", e.exprString(expr))
+	}
+}
+
+// emitMatchReturn emits a match expression in tail-return position.
+func (e *emitter) emitMatchReturn(me *ast.MatchExpr) {
+	if isConstructorMatch(me) {
+		e.emitTypeSwitchReturn(me)
+	} else {
+		e.emitValueSwitchReturn(me)
+	}
+}
+
+func (e *emitter) emitTypeSwitchReturn(me *ast.MatchExpr) {
+	scrutineeName := identName(me.Scrutinee)
+	hasDefault := false
+	e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
+	for _, arm := range me.Arms {
+		switch p := arm.Pattern.(type) {
+		case *ast.ConstructorPattern:
+			e.linef("case %s:", e.constructorCaseLabel(p.Constructor, scrutineeName))
+			e.indent++
+			e.emitPatternBindings(p, "__match")
+			e.emitMatchArmReturn(arm.Body)
+			e.indent--
+		case *ast.VarPattern:
+			hasDefault = true
+			e.linef("default:")
+			e.indent++
+			e.linef("%s := __match", p.Name)
+			e.emitMatchArmReturn(arm.Body)
+			e.indent--
+		case *ast.WildcardPattern:
+			hasDefault = true
+			e.linef("default:")
+			e.indent++
+			e.emitMatchArmReturn(arm.Body)
+			e.indent--
+		}
+	}
+	e.linef("}")
+	if !hasDefault {
+		e.linef(`panic("unreachable")`)
+	}
+}
+
+func (e *emitter) emitValueSwitchReturn(me *ast.MatchExpr) {
+	hasDefault := false
+	e.linef("switch %s {", e.exprString(me.Scrutinee))
+	for _, arm := range me.Arms {
+		switch p := arm.Pattern.(type) {
+		case *ast.LiteralPattern:
+			e.linef("case %s:", e.exprString(p.Value))
+			e.indent++
+			e.emitMatchArmReturn(arm.Body)
+			e.indent--
+		case *ast.VarPattern:
+			hasDefault = true
+			e.linef("default:")
+			e.indent++
+			e.linef("%s := %s", p.Name, e.exprString(me.Scrutinee))
+			e.emitMatchArmReturn(arm.Body)
+			e.indent--
+		case *ast.WildcardPattern:
+			hasDefault = true
+			e.linef("default:")
+			e.indent++
+			e.emitMatchArmReturn(arm.Body)
+			e.indent--
+		}
+	}
+	e.linef("}")
+	if !hasDefault {
+		e.linef(`panic("unreachable")`)
+	}
+}
+
+// emitMatchArmReturn emits the body of a match arm in tail-return position.
+func (e *emitter) emitMatchArmReturn(body []ast.Expr) {
+	if len(body) == 0 {
+		return
+	}
+	e.emitBody(body[:len(body)-1])
+	last := body[len(body)-1]
+	if _, isReturn := last.(*ast.ReturnExpr); isReturn {
+		e.emitStmt(last)
+		return
+	}
+	e.linef("return %s", e.exprString(last))
+}
+
+// emitIfReturn emits an if expression in tail-return position.
+func (e *emitter) emitIfReturn(ie *ast.IfExpr) {
+	e.linef("if %s {", e.exprString(ie.Cond))
+	e.indent++
+	e.emitBodyWithTail(ie.Then, true)
+	e.indent--
+	if len(ie.Else) > 0 {
+		e.linef("} else {")
+		e.indent++
+		e.emitBodyWithTail(ie.Else, true)
+		e.indent--
+	}
+	e.linef("}")
 }
 
 func (e *emitter) emitStmt(expr ast.Expr) {

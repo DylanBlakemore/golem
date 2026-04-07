@@ -206,6 +206,90 @@ end`)
 	}
 }
 
+func TestADTDomainModelEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	origDir := chDir(t, dir)
+	defer restoreDir(t, origDir)
+
+	writeFile(t, filepath.Join(dir, "domain.golem"), `import "os"
+import "fmt"
+
+type FileResult =
+  | TextFile { content: String }
+  | EmptyFile
+  | ReadError { message: String }
+
+priv fn describeResult(r: FileResult): String do
+  match r do
+    | TextFile { content } -> "Got content: " <> content
+    | EmptyFile -> "File was empty"
+    | ReadError { message } -> "Error: " <> message
+  end
+end
+
+pub fn processFile(path: String): String do
+  let result = os.readFile(path)
+  match result do
+    | Ok { value } -> describeResult(TextFile { content: fmt.sprintf("%s", value) })
+    | Err { error } -> describeResult(ReadError { message: fmt.sprintf("%v", error) })
+  end
+end
+
+pub fn main() do
+  fmt.println(processFile("/etc/hosts"))
+end`)
+
+	mkDir(t, filepath.Join(dir, "build"))
+
+	ok := compileFile("domain.golem", false, goloader.New())
+	if !ok {
+		t.Fatal("ADT domain model example failed to compile")
+	}
+
+	outPath := filepath.Join(dir, "build", "domain.golem.go")
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("could not read output: %v", err)
+	}
+	out := string(data)
+
+	// Sum type variants generate correctly (type is unqualified, so lowercase in Go).
+	assertContains(t, out, "type fileResult interface")
+	assertContains(t, out, "type fileResultTextFile struct")
+	assertContains(t, out, "type fileResultEmptyFile struct")
+	assertContains(t, out, "type fileResultReadError struct")
+
+	// Pattern matching is present.
+	assertContains(t, out, "func describeResult(")
+	assertContains(t, out, "func ProcessFile(")
+
+	// Go interop types map correctly (Result IIFE wrapper for os.ReadFile).
+	assertContains(t, out, "func() Result[[]byte, error]")
+	assertContains(t, out, "os.ReadFile(")
+
+	// Type switch cases use concrete type parameters.
+	assertContains(t, out, "case ResultOk[[]byte, error]:")
+	assertContains(t, out, "case ResultErr[[]byte, error]:")
+
+	// fmt import is present.
+	assertContains(t, out, `"fmt"`)
+	assertContains(t, out, `"os"`)
+
+	// Verify the generated code compiles as valid Go.
+	goMod := filepath.Join(dir, "build", "go.mod")
+	writeFile(t, goMod, "module golem-test\n\ngo 1.21\n")
+	goVet := exec.Command("go", "vet", "./...")
+	goVet.Dir = filepath.Join(dir, "build")
+	if vetOut, err := goVet.CombinedOutput(); err != nil {
+		t.Fatalf("go vet failed on generated code: %v\n%s\nGenerated:\n%s", err, vetOut, out)
+	}
+	goBuild := exec.Command("go", "build", "-o", os.DevNull, ".")
+	goBuild.Dir = filepath.Join(dir, "build")
+	if buildOut, err := goBuild.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed on generated code: %v\n%s\nGenerated:\n%s", err, buildOut, out)
+	}
+}
+
 func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {

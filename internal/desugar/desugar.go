@@ -472,6 +472,13 @@ func (d *desugarer) desugarExpr(expr ast.Expr) ast.Expr {
 		// Should have been hoisted in desugarExprs; handle gracefully if reached directly.
 		return d.desugarExpr(e.Expr)
 
+	case *ast.GoLiftCallExpr:
+		return &ast.GoLiftCallExpr{
+			Span:        e.Span,
+			Call:        d.desugarExpr(e.Call),
+			ValueGoType: e.ValueGoType,
+		}
+
 	default:
 		return expr
 	}

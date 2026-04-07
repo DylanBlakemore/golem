@@ -365,9 +365,9 @@ pub fn main() do
 end
 ```
 
-- [ ] This compiles without errors
-- [ ] Sum type variants generate correctly
-- [ ] Pattern matching is exhaustive
-- [ ] Go interop types map correctly
-- [ ] Error handling works end-to-end
-- [ ] All Phase 1 tests pass
+- [x] This compiles without errors
+- [x] Sum type variants generate correctly
+- [x] Pattern matching is exhaustive
+- [x] Go interop types map correctly
+- [x] Error handling works end-to-end
+- [x] All Phase 1 tests pass
