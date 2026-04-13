@@ -243,6 +243,10 @@ func (e *emitter) emitTailStmt(expr ast.Expr) {
 
 // emitMatchReturn emits a match expression in tail-return position.
 func (e *emitter) emitMatchReturn(me *ast.MatchExpr) {
+	if hasGuard(me) {
+		e.emitGuardedMatchReturn(me)
+		return
+	}
 	if isConstructorMatch(me) {
 		e.emitTypeSwitchReturn(me)
 	} else {
@@ -270,43 +274,45 @@ func (e *emitter) emitTypeSwitchReturn(me *ast.MatchExpr) {
 }
 
 func (e *emitter) emitValueSwitchReturn(me *ast.MatchExpr) {
-	hasDefault := false
-	e.linef("switch %s {", e.exprString(me.Scrutinee))
-	for _, arm := range me.Arms {
-		switch p := arm.Pattern.(type) {
-		case *ast.LiteralPattern:
-			e.linef("case %s:", e.exprString(p.Value))
-			e.indent++
-			e.emitMatchArmReturn(arm.Body)
-			e.indent--
-		case *ast.VarPattern:
-			hasDefault = true
-			e.linef("default:")
-			e.indent++
-			e.linef("%s := %s", p.Name, e.exprString(me.Scrutinee))
-			e.emitMatchArmReturn(arm.Body)
-			e.indent--
-		case *ast.WildcardPattern:
-			hasDefault = true
-			e.linef("default:")
-			e.indent++
-			e.emitMatchArmReturn(arm.Body)
-			e.indent--
-		}
-	}
-	e.linef("}")
-	if !hasDefault {
+	e.emitValueSwitch(me, func(arm *ast.MatchArm) {
+		e.emitMatchArmReturn(arm.Body)
+	})
+	if !hasValueSwitchDefault(me) {
 		e.linef(`panic("unreachable")`)
 	}
 }
 
+// hasValueSwitchDefault reports whether a value-based match contains a
+// default arm (var or wildcard pattern) covering all non-matched values.
+func hasValueSwitchDefault(me *ast.MatchExpr) bool {
+	for _, arm := range me.Arms {
+		switch arm.Pattern.(type) {
+		case *ast.VarPattern, *ast.WildcardPattern:
+			return true
+		}
+	}
+	return false
+}
+
+// emitArmLead emits all body statements except the last and returns the last
+// expression (or nil for an empty body). Callers decide how to render the
+// tail based on emission context (return, assign, break, etc.).
+func (e *emitter) emitArmLead(body []ast.Expr) ast.Expr {
+	if len(body) == 0 {
+		return nil
+	}
+	for _, s := range body[:len(body)-1] {
+		e.emitStmt(s)
+	}
+	return body[len(body)-1]
+}
+
 // emitMatchArmReturn emits the body of a match arm in tail-return position.
 func (e *emitter) emitMatchArmReturn(body []ast.Expr) {
-	if len(body) == 0 {
+	last := e.emitArmLead(body)
+	if last == nil {
 		return
 	}
-	e.emitBody(body[:len(body)-1])
-	last := body[len(body)-1]
 	if _, isReturn := last.(*ast.ReturnExpr); isReturn {
 		e.emitStmt(last)
 		return
@@ -700,6 +706,10 @@ func findNestedFieldIdx(arms []*ast.MatchArm) int {
 
 // emitMatchStmt emits a match expression in statement position.
 func (e *emitter) emitMatchStmt(me *ast.MatchExpr) {
+	if hasGuard(me) {
+		e.emitGuardedMatchStmt(me)
+		return
+	}
 	if isConstructorMatch(me) {
 		e.emitTypeSwitchStmt(me)
 	} else {
@@ -866,6 +876,7 @@ func (e *emitter) emitInnerGroup(ig *innerArmGroup, outerVar, nestVar string, ne
 			transformedArms[i] = &ast.MatchArm{
 				Span:    a.Span,
 				Pattern: ig.innerCps[i],
+				Guard:   a.Guard,
 				Body:    a.Body,
 			}
 		}
@@ -949,24 +960,33 @@ func (e *emitter) emitSingleFieldBinding(fp *ast.FieldPattern, varName string) {
 }
 
 func (e *emitter) emitValueSwitchStmt(me *ast.MatchExpr) {
+	e.emitValueSwitch(me, func(arm *ast.MatchArm) {
+		e.emitBody(arm.Body)
+	})
+}
+
+// emitValueSwitch emits a Go `switch scrut { ... }` over literal arms,
+// dispatching each arm body through the emitBody callback. Var/wildcard
+// arms become the default case.
+func (e *emitter) emitValueSwitch(me *ast.MatchExpr, emitBody func(*ast.MatchArm)) {
 	e.linef("switch %s {", e.exprString(me.Scrutinee))
 	for _, arm := range me.Arms {
 		switch p := arm.Pattern.(type) {
 		case *ast.LiteralPattern:
 			e.linef("case %s:", e.exprString(p.Value))
 			e.indent++
-			e.emitBody(arm.Body)
+			emitBody(arm)
 			e.indent--
 		case *ast.VarPattern:
 			e.linef("default:")
 			e.indent++
 			e.linef("%s := %s", p.Name, e.exprString(me.Scrutinee))
-			e.emitBody(arm.Body)
+			emitBody(arm)
 			e.indent--
 		case *ast.WildcardPattern:
 			e.linef("default:")
 			e.indent++
-			e.emitBody(arm.Body)
+			emitBody(arm)
 			e.indent--
 		}
 	}
@@ -1001,6 +1021,10 @@ func (e *emitter) constructorCaseLabel(constructor, scrutineeName string) string
 func (e *emitter) emitMatchAssign(name string, me *ast.MatchExpr) {
 	goType := e.inferMatchType(me)
 	e.linef("var %s %s", name, goType)
+	if hasGuard(me) {
+		e.emitGuardedMatchAssign(name, me)
+		return
+	}
 	if isConstructorMatch(me) {
 		e.emitTypeSwitchAssign(name, me)
 	} else {
@@ -1021,38 +1045,16 @@ func (e *emitter) emitTypeSwitchAssign(name string, me *ast.MatchExpr) {
 }
 
 func (e *emitter) emitValueSwitchAssign(name string, me *ast.MatchExpr) {
-	e.linef("switch %s {", e.exprString(me.Scrutinee))
-	for _, arm := range me.Arms {
-		switch p := arm.Pattern.(type) {
-		case *ast.LiteralPattern:
-			e.linef("case %s:", e.exprString(p.Value))
-			e.indent++
-			e.emitMatchArmAssign(name, arm.Body)
-			e.indent--
-		case *ast.VarPattern:
-			e.linef("default:")
-			e.indent++
-			e.linef("%s := %s", p.Name, e.exprString(me.Scrutinee))
-			e.emitMatchArmAssign(name, arm.Body)
-			e.indent--
-		case *ast.WildcardPattern:
-			e.linef("default:")
-			e.indent++
-			e.emitMatchArmAssign(name, arm.Body)
-			e.indent--
-		}
-	}
-	e.linef("}")
+	e.emitValueSwitch(me, func(arm *ast.MatchArm) {
+		e.emitMatchArmAssign(name, arm.Body)
+	})
 }
 
 func (e *emitter) emitMatchArmAssign(name string, body []ast.Expr) {
-	if len(body) == 0 {
+	last := e.emitArmLead(body)
+	if last == nil {
 		return
 	}
-	for _, stmt := range body[:len(body)-1] {
-		e.emitStmt(stmt)
-	}
-	last := body[len(body)-1]
 	// If the last statement is a return, emit it as a statement rather than an assignment.
 	if _, isReturn := last.(*ast.ReturnExpr); isReturn {
 		e.emitStmt(last)
@@ -1070,39 +1072,13 @@ func (e *emitter) matchExprIIFE(me *ast.MatchExpr) string {
 	e.buf = strings.Builder{}
 	e.indent = 0
 
-	if isConstructorMatch(me) {
-		scrutineeName := identName(me.Scrutinee)
-		groups := groupArmsByConstructor(me.Arms)
-		e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
-		for _, g := range groups {
-			e.emitArmGroup(g, "__match", scrutineeName, 0, func(arm *ast.MatchArm) {
-				e.emitReturnBody(arm.Body)
-			})
-		}
-		e.linef("}")
-	} else {
-		e.linef("switch %s {", e.exprString(me.Scrutinee))
-		for _, arm := range me.Arms {
-			switch p := arm.Pattern.(type) {
-			case *ast.LiteralPattern:
-				e.linef("case %s:", e.exprString(p.Value))
-				e.indent++
-				e.emitReturnBody(arm.Body)
-				e.indent--
-			case *ast.VarPattern:
-				e.linef("default:")
-				e.indent++
-				e.linef("%s := %s", p.Name, e.exprString(me.Scrutinee))
-				e.emitReturnBody(arm.Body)
-				e.indent--
-			case *ast.WildcardPattern:
-				e.linef("default:")
-				e.indent++
-				e.emitReturnBody(arm.Body)
-				e.indent--
-			}
-		}
-		e.linef("}")
+	switch {
+	case hasGuard(me):
+		e.emitGuardedMatchIIFEBody(me)
+	case isConstructorMatch(me):
+		e.emitTypeSwitchIIFEBody(me)
+	default:
+		e.emitValueSwitchIIFEBody(me)
 	}
 
 	body := e.buf.String()
@@ -1114,6 +1090,24 @@ func (e *emitter) matchExprIIFE(me *ast.MatchExpr) string {
 	return b.String()
 }
 
+func (e *emitter) emitTypeSwitchIIFEBody(me *ast.MatchExpr) {
+	scrutineeName := identName(me.Scrutinee)
+	groups := groupArmsByConstructor(me.Arms)
+	e.linef("switch __match := %s.(type) {", e.exprString(me.Scrutinee))
+	for _, g := range groups {
+		e.emitArmGroup(g, "__match", scrutineeName, 0, func(arm *ast.MatchArm) {
+			e.emitReturnBody(arm.Body)
+		})
+	}
+	e.linef("}")
+}
+
+func (e *emitter) emitValueSwitchIIFEBody(me *ast.MatchExpr) {
+	e.emitValueSwitch(me, func(arm *ast.MatchArm) {
+		e.emitReturnBody(arm.Body)
+	})
+}
+
 // emitReturnBody emits the body of a match arm as return statements for IIFE context.
 func (e *emitter) emitReturnBody(body []ast.Expr) {
 	if len(body) == 0 {
@@ -1123,6 +1117,175 @@ func (e *emitter) emitReturnBody(body []ast.Expr) {
 		e.linef("%s", e.exprString(stmt))
 	}
 	e.linef("return %s", e.exprString(body[len(body)-1]))
+}
+
+// --- Guarded match emission ---
+//
+// When a match contains any arm with a guard clause, we cannot use a Go
+// switch because the guard may filter out a matched value and we need to
+// try the next arm. Instead we emit a for-loop with a sequential if-chain:
+// each arm is a type assertion (or value compare) that opens a scope for
+// bindings, runs the guard, executes the body, and breaks out of the loop.
+
+// hasGuard reports whether any arm of a match has a guard clause.
+func hasGuard(me *ast.MatchExpr) bool {
+	for _, arm := range me.Arms {
+		if arm.Guard != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// guardedScrutineeName returns the Go identifier used to refer to the
+// scrutinee inside a guarded match body. If the scrutinee is already an
+// ident, its name is used directly; otherwise a __scrut temporary is
+// emitted and its name returned.
+func (e *emitter) guardedScrutineeName(me *ast.MatchExpr) string {
+	if name := identName(me.Scrutinee); name != "" {
+		return name
+	}
+	e.linef("__scrut := %s", e.exprString(me.Scrutinee))
+	return "__scrut"
+}
+
+// emitGuardedMatchReturn emits a guarded match in tail-return position.
+func (e *emitter) emitGuardedMatchReturn(me *ast.MatchExpr) {
+	scrut := e.guardedScrutineeName(me)
+	e.linef("for {")
+	e.indent++
+	for _, arm := range me.Arms {
+		e.emitGuardedArm(arm, scrut, func(a *ast.MatchArm) {
+			e.emitMatchArmReturn(a.Body)
+		})
+	}
+	e.linef("break")
+	e.indent--
+	e.linef("}")
+	e.linef(`panic("unreachable")`)
+}
+
+// emitGuardedMatchStmt emits a guarded match in statement position.
+func (e *emitter) emitGuardedMatchStmt(me *ast.MatchExpr) {
+	scrut := e.guardedScrutineeName(me)
+	e.linef("for {")
+	e.indent++
+	for _, arm := range me.Arms {
+		e.emitGuardedArm(arm, scrut, func(a *ast.MatchArm) {
+			e.emitGuardedArmStmtBody(a.Body)
+		})
+	}
+	e.linef("break")
+	e.indent--
+	e.linef("}")
+}
+
+// emitGuardedMatchAssign emits a guarded match that assigns its result to name.
+func (e *emitter) emitGuardedMatchAssign(name string, me *ast.MatchExpr) {
+	scrut := e.guardedScrutineeName(me)
+	e.linef("for {")
+	e.indent++
+	for _, arm := range me.Arms {
+		e.emitGuardedArm(arm, scrut, func(a *ast.MatchArm) {
+			e.emitGuardedArmAssignBody(name, a.Body)
+		})
+	}
+	e.linef("break")
+	e.indent--
+	e.linef("}")
+}
+
+// emitGuardedMatchIIFEBody emits a guarded match as the body of a func() T IIFE.
+func (e *emitter) emitGuardedMatchIIFEBody(me *ast.MatchExpr) {
+	scrut := e.guardedScrutineeName(me)
+	e.linef("for {")
+	e.indent++
+	for _, arm := range me.Arms {
+		e.emitGuardedArm(arm, scrut, func(a *ast.MatchArm) {
+			e.emitReturnBody(a.Body)
+		})
+	}
+	e.linef("break")
+	e.indent--
+	e.linef("}")
+	e.linef(`panic("unreachable")`)
+}
+
+// emitGuardedArm emits a single arm within the for-loop: a conditional scope
+// containing bindings, optional guard, and the body.
+func (e *emitter) emitGuardedArm(arm *ast.MatchArm, scrut string, emitBody func(*ast.MatchArm)) {
+	switch p := arm.Pattern.(type) {
+	case *ast.ConstructorPattern:
+		label := e.constructorCaseLabel(p.Constructor, scrut)
+		e.linef("if __v, __ok := %s.(%s); __ok {", scrut, label)
+		e.indent++
+		e.emitPatternBindings(p, "__v")
+		e.emitGuardedBody(arm, emitBody)
+		e.indent--
+		e.linef("}")
+	case *ast.LiteralPattern:
+		e.linef("if %s == %s {", scrut, e.exprString(p.Value))
+		e.indent++
+		e.emitGuardedBody(arm, emitBody)
+		e.indent--
+		e.linef("}")
+	case *ast.VarPattern:
+		e.linef("{")
+		e.indent++
+		e.linef("%s := %s", p.Name, scrut)
+		e.emitGuardedBody(arm, emitBody)
+		e.indent--
+		e.linef("}")
+	case *ast.WildcardPattern:
+		e.linef("{")
+		e.indent++
+		e.emitGuardedBody(arm, emitBody)
+		e.indent--
+		e.linef("}")
+	}
+}
+
+// emitGuardedBody wraps the body in the arm's guard condition when present.
+func (e *emitter) emitGuardedBody(arm *ast.MatchArm, emitBody func(*ast.MatchArm)) {
+	if arm.Guard == nil {
+		emitBody(arm)
+		return
+	}
+	e.linef("if %s {", e.exprString(arm.Guard))
+	e.indent++
+	emitBody(arm)
+	e.indent--
+	e.linef("}")
+}
+
+// emitGuardedArmStmtBody emits an arm body in statement context, then breaks.
+// A trailing return in the body replaces the break because it already exits.
+func (e *emitter) emitGuardedArmStmtBody(body []ast.Expr) {
+	last := e.emitArmLead(body)
+	if last == nil {
+		e.linef("break")
+		return
+	}
+	e.emitStmt(last)
+	if _, isReturn := last.(*ast.ReturnExpr); !isReturn {
+		e.linef("break")
+	}
+}
+
+// emitGuardedArmAssignBody emits an arm body that assigns its value to name,
+// then breaks. A trailing return in the body replaces the assign+break.
+func (e *emitter) emitGuardedArmAssignBody(name string, body []ast.Expr) {
+	last := e.emitArmLead(body)
+	if last == nil {
+		e.linef("break")
+		return
+	}
+	if _, isReturn := last.(*ast.ReturnExpr); isReturn {
+		e.emitStmt(last)
+		return
+	}
+	e.linef("%s = %s", name, e.exprString(last))
+	e.linef("break")
 }
 
 func (e *emitter) inferMatchType(me *ast.MatchExpr) string {

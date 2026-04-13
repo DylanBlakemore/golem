@@ -41,23 +41,44 @@ func (c *Checker) checkMatchExhaustive(e *ast.MatchExpr, scrutineeType *Type) {
 		}
 	}
 
-	matrix := make([][]ast.Pattern, len(e.Arms))
-	for i, arm := range e.Arms {
-		matrix[i] = []ast.Pattern{arm.Pattern}
-	}
+	// Coverage matrix skips guarded arms — they may not match at runtime and
+	// therefore cannot contribute to constructor coverage, or to shadowing
+	// subsequent arms during redundancy analysis.
+	coverageMatrix := unguardedMatrix(e.Arms)
 	types := []*Type{resolved}
 
-	missing := c.findMissing(matrix, types)
+	missing := c.findMissing(coverageMatrix, types)
 	if len(missing) > 0 {
 		c.error(e.Span, fmt.Sprintf("non-exhaustive match, missing patterns: %s",
 			strings.Join(missing, ", ")))
 	}
 
 	for i := 1; i < len(e.Arms); i++ {
-		if !c.isUseful(matrix[:i], matrix[i], types) {
+		// Guarded arms cannot be flagged unreachable: the guard may legally
+		// filter out values that overlap a preceding pattern.
+		if e.Arms[i].Guard != nil {
+			continue
+		}
+		prior := unguardedMatrix(e.Arms[:i])
+		row := []ast.Pattern{e.Arms[i].Pattern}
+		if !c.isUseful(prior, row, types) {
 			c.warning(e.Arms[i].Span, "unreachable match arm")
 		}
 	}
+}
+
+// unguardedMatrix builds a single-column pattern matrix containing only arms
+// without guard clauses. Guarded arms are excluded because their runtime
+// behavior depends on a condition the algorithm cannot reason about.
+func unguardedMatrix(arms []*ast.MatchArm) [][]ast.Pattern {
+	var result [][]ast.Pattern
+	for _, arm := range arms {
+		if arm.Guard != nil {
+			continue
+		}
+		result = append(result, []ast.Pattern{arm.Pattern})
+	}
+	return result
 }
 
 // typeConstructors returns the complete constructor set for finite types.
@@ -144,21 +165,15 @@ func subPatterns(p ast.Pattern, ctor constructor) []ast.Pattern {
 				fieldPats[fp.Name] = fp.Pattern
 			}
 		}
-		result := make([]ast.Pattern, ctor.arity)
+		result := wildcardPatterns(ctor.arity)
 		for i, name := range ctor.fieldNames {
 			if nested, ok := fieldPats[name]; ok {
 				result[i] = nested
-			} else {
-				result[i] = &ast.WildcardPattern{}
 			}
 		}
 		return result
 	}
-	result := make([]ast.Pattern, ctor.arity)
-	for i := range result {
-		result[i] = &ast.WildcardPattern{}
-	}
-	return result
+	return wildcardPatterns(ctor.arity)
 }
 
 // specialize produces the specialized matrix for constructor ctor at column 0.
@@ -170,11 +185,7 @@ func specialize(matrix [][]ast.Pattern, ctor constructor) [][]ast.Pattern {
 	for _, row := range matrix {
 		name, isWild := patternInfo(row[0])
 		if isWild || name == ctor.name {
-			sub := subPatterns(row[0], ctor)
-			newRow := make([]ast.Pattern, 0, len(sub)+len(row)-1)
-			newRow = append(newRow, sub...)
-			newRow = append(newRow, row[1:]...)
-			result = append(result, newRow)
+			result = append(result, specializedRow(subPatterns(row[0], ctor), row))
 		}
 	}
 	return result
@@ -200,9 +211,7 @@ func expandDefault(def [][]ast.Pattern, ctor constructor) [][]ast.Pattern {
 	result := make([][]ast.Pattern, len(def))
 	for i, row := range def {
 		newRow := make([]ast.Pattern, 0, ctor.arity+len(row))
-		for range ctor.arity {
-			newRow = append(newRow, &ast.WildcardPattern{})
-		}
+		newRow = append(newRow, wildcardPatterns(ctor.arity)...)
 		newRow = append(newRow, row...)
 		result[i] = newRow
 	}
@@ -311,10 +320,7 @@ func (c *Checker) isUseful(matrix [][]ast.Pattern, row []ast.Pattern, types []*T
 	if !isWild {
 		ctor := c.findCtor(ctors, name)
 		spec := specialize(matrix, ctor)
-		sub := subPatterns(row[0], ctor)
-		newRow := make([]ast.Pattern, 0, len(sub)+len(row)-1)
-		newRow = append(newRow, sub...)
-		newRow = append(newRow, row[1:]...)
+		newRow := specializedRow(subPatterns(row[0], ctor), row)
 		subTypes := concatTypes(ctor.fieldTypes, restTypes)
 		return c.isUseful(spec, newRow, subTypes)
 	}
@@ -328,19 +334,32 @@ func (c *Checker) isUseful(matrix [][]ast.Pattern, row []ast.Pattern, types []*T
 	// Finite type: wildcard is useful if useful for at least one constructor
 	for _, ctor := range ctors {
 		spec := specialize(matrix, ctor)
-		sub := make([]ast.Pattern, ctor.arity)
-		for i := range sub {
-			sub[i] = &ast.WildcardPattern{}
-		}
-		newRow := make([]ast.Pattern, 0, len(sub)+len(row)-1)
-		newRow = append(newRow, sub...)
-		newRow = append(newRow, row[1:]...)
+		newRow := specializedRow(wildcardPatterns(ctor.arity), row)
 		subTypes := concatTypes(ctor.fieldTypes, restTypes)
 		if c.isUseful(spec, newRow, subTypes) {
 			return true
 		}
 	}
 	return false
+}
+
+// specializedRow replaces the head of row with sub, the sub-patterns for the
+// constructor being specialized on.
+func specializedRow(sub []ast.Pattern, row []ast.Pattern) []ast.Pattern {
+	result := make([]ast.Pattern, 0, len(sub)+len(row)-1)
+	result = append(result, sub...)
+	result = append(result, row[1:]...)
+	return result
+}
+
+// wildcardPatterns returns a slice of n fresh wildcard patterns, used when a
+// variable/wildcard pattern is specialized against a constructor.
+func wildcardPatterns(n int) []ast.Pattern {
+	result := make([]ast.Pattern, n)
+	for i := range result {
+		result[i] = &ast.WildcardPattern{}
+	}
+	return result
 }
 
 // findCtor finds the constructor definition by name, or creates an arity-0

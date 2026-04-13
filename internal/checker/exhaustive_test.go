@@ -336,3 +336,65 @@ fn check(r: Response): String do
 end`)
 	expectNoErrors(t, errs)
 }
+
+// --- Guard clauses ---
+
+func TestGuardMustBeBool(t *testing.T) {
+	_, errs := check(`fn classify(n: Int): String do
+  match n do
+    | x if x -> "pos"
+    | _ -> "other"
+  end
+end`)
+	expectErrorContains(t, errs, "Bool")
+}
+
+func TestGuardVarInScope(t *testing.T) {
+	_, errs := check(`fn classify(n: Int): String do
+  match n do
+    | x if x > 0 -> "pos"
+    | _ -> "other"
+  end
+end`)
+	expectNoErrors(t, errs)
+}
+
+func TestGuardedArmDoesNotSatisfyExhaustiveness(t *testing.T) {
+	_, errs := check(`type Color =
+  | Red
+  | Green
+  | Blue
+
+fn name(c: Color): String do
+  match c do
+    | Red -> "red"
+    | Green -> "green"
+    | Blue if true -> "blue"
+  end
+end`)
+	expectErrorContains(t, errs, "non-exhaustive")
+}
+
+func TestGuardedWildcardDoesNotSatisfyExhaustiveness(t *testing.T) {
+	_, errs := check(`fn describe(n: Int): String do
+  match n do
+    | x if x > 0 -> "pos"
+  end
+end`)
+	expectErrorContains(t, errs, "non-exhaustive")
+}
+
+func TestGuardOnConstructorPattern(t *testing.T) {
+	_, errs := check(`type Shape =
+  | Circle { radius: Float }
+  | Square { side: Float }
+
+fn classify(s: Shape): String do
+  match s do
+    | Circle { radius } if radius > 10.0 -> "big circle"
+    | Circle { radius } -> "small circle"
+    | Square { side } -> "square"
+  end
+end`)
+	expectNoErrors(t, errs)
+}

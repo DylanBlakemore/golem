@@ -111,9 +111,14 @@ func (l *lifter) liftExpr(expr ast.Expr) ast.Expr {
 	case *ast.MatchExpr:
 		newArms := make([]*ast.MatchArm, len(e.Arms))
 		for i, arm := range e.Arms {
+			var guard ast.Expr
+			if arm.Guard != nil {
+				guard = l.liftExpr(arm.Guard)
+			}
 			newArms[i] = &ast.MatchArm{
 				Span:    arm.Span,
 				Pattern: arm.Pattern,
+				Guard:   guard,
 				Body:    l.liftExprs(arm.Body),
 			}
 		}

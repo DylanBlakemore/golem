@@ -77,39 +77,31 @@ Reference: [pattern-matching.md](../architecture/pattern-matching.md)
 Reference: [pattern-matching.md](../architecture/pattern-matching.md)
 
 ### Parsing
-- [ ] Guard syntax: `| pattern if condition -> body`
-- [ ] Guard is an arbitrary boolean expression
-- [ ] Guard can reference variables bound in the pattern
+- [x] Guard syntax: `| pattern if condition -> body`
+- [x] Guard is an arbitrary boolean expression
+- [x] Guard can reference variables bound in the pattern
 
 ### Type Checking
-- [ ] Guard expression must be Bool
-- [ ] Variables bound in pattern are in scope for guard
-- [ ] Guarded arms do not count toward exhaustiveness (may fail at runtime)
+- [x] Guard expression must be Bool
+- [x] Variables bound in pattern are in scope for guard
+- [x] Guarded arms do not count toward exhaustiveness (may fail at runtime)
 
 ### Exhaustiveness
-- [ ] Arms with guards treated as potentially non-matching
-- [ ] Non-guarded wildcard/variable still required for infinite types
-- [ ] For finite types: guarded arms don't satisfy constructor coverage
+- [x] Arms with guards treated as potentially non-matching
+- [x] Non-guarded wildcard/variable still required for infinite types
+- [x] For finite types: guarded arms don't satisfy constructor coverage
 
 ### Code Generation
-- [ ] Guard becomes `if` condition within matched branch:
-  ```go
-  case UserRecord:
-      if v.Age >= 18 {
-          result = "adult"
-      } else {
-          // fall through to next arm
-      }
-  ```
-- [ ] Fall-through handling: when guard fails, continue to next matching arm
-  - Implementation: flatten to sequential if-else chain rather than Go switch fall-through
+- [x] Guard becomes `if` condition within matched branch
+- [x] Fall-through handling: when guard fails, continue to next matching arm
+  - Implementation: sequential if-chain inside a single-iteration for-loop
 
 ### Tests
-- [ ] Parse guard clauses
-- [ ] Type check guard expressions (must be Bool)
-- [ ] Guard variables from pattern are in scope
-- [ ] Exhaustiveness with guards
-- [ ] Code gen: guard condition in generated Go
+- [x] Parse guard clauses
+- [x] Type check guard expressions (must be Bool)
+- [x] Guard variables from pattern are in scope
+- [x] Exhaustiveness with guards
+- [x] Code gen: guard condition in generated Go
 
 ---
 

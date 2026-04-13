@@ -796,3 +796,62 @@ end`)
 	assertContains(t, out, "case innerLeaf:")
 	assertContains(t, out, "case innerEmpty:")
 }
+
+// --- Guard clauses ---
+
+func TestGuardValueMatchCodegen(t *testing.T) {
+	out := generate(t, `fn classify(n: Int): String do
+  match n do
+    | x if x > 0 -> "pos"
+    | x if x < 0 -> "neg"
+    | _ -> "zero"
+  end
+end`)
+	// Guard condition must appear
+	assertContains(t, out, "> 0")
+	assertContains(t, out, "< 0")
+	assertContains(t, out, `"pos"`)
+	assertContains(t, out, `"zero"`)
+}
+
+func TestGuardConstructorMatchCodegen(t *testing.T) {
+	out := generate(t, `type Shape =
+  | Circle { radius: Float }
+  | Square { side: Float }
+
+fn classify(s: Shape): String do
+  match s do
+    | Circle { radius } if radius > 10.0 -> "big"
+    | Circle { radius } -> "small"
+    | Square { side } -> "sq"
+  end
+end`)
+	assertContains(t, out, "Circle")
+	assertContains(t, out, "> 10")
+	assertContains(t, out, `"big"`)
+	assertContains(t, out, `"small"`)
+	assertContains(t, out, `"sq"`)
+}
+
+func TestGuardOnNestedConstructorPattern(t *testing.T) {
+	out := generate(t, `type Role =
+  | Admin
+  | Member { team: String }
+
+type Response =
+  | Success { role: Role }
+  | Failure { reason: String }
+
+fn describe(r: Response): String do
+  match r do
+    | Success { role: Member { team } } if team == "eng" -> "eng member"
+    | Success { role: Member { team } } -> "other member"
+    | Success { role: Admin } -> "admin"
+    | Failure { reason } -> reason
+  end
+end`)
+	assertContains(t, out, `"eng member"`)
+	assertContains(t, out, `"other member"`)
+	assertContains(t, out, `"admin"`)
+	assertContains(t, out, `== "eng"`)
+}

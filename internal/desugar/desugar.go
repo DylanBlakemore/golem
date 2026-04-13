@@ -487,9 +487,14 @@ func (d *desugarer) desugarExpr(expr ast.Expr) ast.Expr {
 func (d *desugarer) desugarMatchExpr(e *ast.MatchExpr) *ast.MatchExpr {
 	arms := make([]*ast.MatchArm, len(e.Arms))
 	for i, arm := range e.Arms {
+		var guard ast.Expr
+		if arm.Guard != nil {
+			guard = d.desugarExpr(arm.Guard)
+		}
 		arms[i] = &ast.MatchArm{
 			Span:    arm.Span,
 			Pattern: d.desugarPattern(arm.Pattern),
+			Guard:   guard,
 			Body:    d.desugarExprs(arm.Body),
 		}
 	}

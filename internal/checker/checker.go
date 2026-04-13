@@ -967,6 +967,10 @@ func (c *Checker) inferMatch(e *ast.MatchExpr, env *typeEnv) *Type {
 	for _, arm := range e.Arms {
 		armEnv := env.child()
 		c.checkPattern(arm.Pattern, scrutineeType, armEnv)
+		if arm.Guard != nil {
+			guardType := c.inferExpr(arm.Guard, armEnv)
+			c.unify(guardType, TypeBool, arm.Guard.GetSpan())
+		}
 		armType := c.checkBody(arm.Body, armEnv)
 		if armType != nil {
 			c.unify(resultType, armType, arm.Span)

@@ -1205,6 +1205,12 @@ func (p *Parser) parseMatchArm() *ast.MatchArm {
 
 	pattern := p.parsePattern()
 
+	var guard ast.Expr
+	if p.check(lexer.IF) {
+		p.advance() // consume `if`
+		guard = p.parseExpr()
+	}
+
 	if _, ok := p.expect(lexer.ARROW); !ok {
 		p.synchronize()
 		return nil
@@ -1232,6 +1238,7 @@ func (p *Parser) parseMatchArm() *ast.MatchArm {
 	return &ast.MatchArm{
 		Span:    spanFromTo(start, endSpan),
 		Pattern: pattern,
+		Guard:   guard,
 		Body:    body,
 	}
 }

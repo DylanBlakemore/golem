@@ -1261,6 +1261,60 @@ end`
 	}
 }
 
+func TestParseMatchGuardClause(t *testing.T) {
+	source := `fn classify(n: Int): String do
+  match n do
+    | x if x > 0 -> "pos"
+    | x if x < 0 -> "neg"
+    | _ -> "zero"
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[0].(*ast.FnDecl)
+	matchExpr := fn.Body[0].(*ast.MatchExpr)
+
+	if len(matchExpr.Arms) != 3 {
+		t.Fatalf("expected 3 arms, got %d", len(matchExpr.Arms))
+	}
+	if matchExpr.Arms[0].Guard == nil {
+		t.Fatalf("expected guard on arm 0")
+	}
+	if _, ok := matchExpr.Arms[0].Guard.(*ast.BinaryExpr); !ok {
+		t.Errorf("expected BinaryExpr guard, got %T", matchExpr.Arms[0].Guard)
+	}
+	if matchExpr.Arms[1].Guard == nil {
+		t.Fatalf("expected guard on arm 1")
+	}
+	if matchExpr.Arms[2].Guard != nil {
+		t.Errorf("expected no guard on arm 2")
+	}
+}
+
+func TestParseMatchGuardOnConstructor(t *testing.T) {
+	source := `fn check(s: Shape): String do
+  match s do
+    | Circle { radius } if radius > 0.0 -> "big"
+    | Circle { radius } -> "small"
+  end
+end`
+
+	mod, errs := parse(source)
+	expectNoErrors(t, errs)
+
+	fn := mod.Decls[0].(*ast.FnDecl)
+	matchExpr := fn.Body[0].(*ast.MatchExpr)
+
+	if matchExpr.Arms[0].Guard == nil {
+		t.Fatalf("expected guard on arm 0")
+	}
+	if matchExpr.Arms[1].Guard != nil {
+		t.Errorf("expected no guard on arm 1")
+	}
+}
+
 // --- Generic type parameters ---
 
 func TestParseGenericTypeDecl(t *testing.T) {

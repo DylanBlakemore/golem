@@ -423,6 +423,7 @@ func (e *MatchExpr) GetSpan() span.Span { return e.Span }
 type MatchArm struct {
 	Span    span.Span
 	Pattern Pattern
+	Guard   Expr // optional guard expression (`if cond`); nil if absent
 	Body    []Expr
 }
 
